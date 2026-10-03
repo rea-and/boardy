@@ -1,0 +1,15 @@
+services:
+  boardy:
+    build: .
+    ports:
+      - "4173:4173"
+    volumes:
+      - boardy-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:4173/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  boardy-data:
