@@ -44,6 +44,7 @@ const backupVersion = 1;
 const maxBackupBytes = 7_000_000;
 let state = { user: null, boards: [], theme: 'dark', wallpaper: 'aurora', sidebarCollapsed: false, boardId: null, view: 'home', query: '', onlyDue: false, onlyStarred: false };
 let modal = null;
+let cardSaveStatus = 'Saved';
 let saveTimer;
 let dragState = null;
 let columnDragState = null;
@@ -61,6 +62,14 @@ function notify(message) {
   toast.classList.add('show');
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => toast.classList.remove('show'), 2400);
+}
+function setCardSaveStatus(status) {
+  cardSaveStatus = status;
+  const statusElement = $('.card-save-status');
+  if (statusElement) {
+    statusElement.textContent = status;
+    statusElement.dataset.state = status === 'Saved' ? 'saved' : status === 'Not saved' ? 'error' : 'saving';
+  }
 }
 function firstActiveBoard() { return state.boards.find(board => !board.archived); }
 function currentBoard() { return state.boards.find(board => board.id === state.boardId && !board.archived) || firstActiveBoard(); }
@@ -107,9 +116,16 @@ function setPreferences() {
 }
 function persist() {
   clearTimeout(saveTimer);
+  if (modal?.type === 'card') setCardSaveStatus('Saving…');
   saveTimer = setTimeout(async () => {
-    try { await api('/api/data', { method: 'PUT', body: JSON.stringify({ boards: state.boards, theme: state.theme, wallpaper: state.wallpaper, sidebarCollapsed: state.sidebarCollapsed }) }); notify('Saved'); }
-    catch (error) { notify(error.message); }
+    try {
+      await api('/api/data', { method: 'PUT', body: JSON.stringify({ boards: state.boards, theme: state.theme, wallpaper: state.wallpaper, sidebarCollapsed: state.sidebarCollapsed }) });
+      if (modal?.type === 'card') setCardSaveStatus('Saved');
+      notify('Changes saved');
+    } catch (error) {
+      if (modal?.type === 'card') setCardSaveStatus('Not saved');
+      notify(error.message);
+    }
   }, 350);
 }
 function applySession(result) {
@@ -375,7 +391,7 @@ function wireColumnDragAndDrop() {
     });
   });
 }
-function openCard(cardId, listId) { modal = { type: 'card', cardId, listId }; renderModal(); }
+function openCard(cardId, listId) { modal = { type: 'card', cardId, listId }; setCardSaveStatus('Saved'); renderModal(); }
 function selectedCard() { const board = currentBoard(); const list = board.lists.find(item => item.id === modal.listId); return { card: list && list.cards.find(item => item.id === modal.cardId), list }; }
 function renderModal() {
   const root = $('#modal-root');
@@ -404,6 +420,11 @@ function renderModal() {
   const availableMembers = board.members && board.members.length ? board.members : [{ id: 'member_you', name: state.user.name, initials: state.user.avatar || initials(state.user.name), color: '#17b897' }];
   const memberPicker = modal.memberPicker ? '<div class=\"member-picker\"><div class=\"member-picker-title\">People on this board</div>' + availableMembers.map(member => { const selected = (card.members || []).includes(member.id); return '<button class=\"member-option ' + (selected ? 'selected' : '') + '\" data-action=\"toggle-member\" data-member-id=\"' + esc(member.id) + '\" aria-pressed=\"' + selected + '\"><span class=\"member-avatar\" style=\"background:' + esc(member.color || '#17b897') + '\">' + esc(member.initials || initials(member.name)) + '</span><span>' + esc(member.name) + '</span><span class=\"member-check\">' + (selected ? '✓' : '') + '</span></button>'; }).join('') + '</div>' : '';
   root.innerHTML = '<div class=\"modal-layer\" data-action=\"close-modal\"><div class=\"modal modal--card\" data-stop><div class=\"modal-head\"><div style=\"flex:1\"><div class=\"modal-label\" style=\"margin-top:0\">' + esc(list.title) + '</div><input class=\"detail-input\" id=\"detail-title\" value=\"' + esc(card.title) + '\" /></div><button class=\"icon-btn close\" data-action=\"close-modal\" aria-label=\"Close\">×</button></div><div class=\"modal-body\"><div class=\"card-layout\"><div><div class=\"modal-label\">Description</div><textarea class=\"detail-input description-input\" id=\"detail-description\" placeholder=\"Add a description to your card...\">' + esc(card.description || '') + '</textarea><div class=\"modal-label\">Labels</div><div class=\"labels\" id=\"detail-labels\">' + labels + '<button class=\"ghost-btn\" style=\"padding:3px 5px;font-size:12px\" data-action=\"add-label\">＋ Add label</button></div><div class=\"modal-label checklist-head\"><span>Checklist</span><span style=\"color:var(--muted-2)\">' + done + '/' + (card.checklist || []).length + '</span></div><div>' + checks + '</div><div class=\"checklist-add\"><input class=\"inline-input\" id=\"check-item\" placeholder=\"Add an item\" /><button class=\"secondary-btn\" data-action=\"add-check\">Add</button></div><div class=\"modal-label\">Attachments</div><div class=\"attachment-grid\">' + attachments + '</div><label class=\"secondary-btn\" style=\"display:inline-flex;margin-top:10px;font-size:12px;cursor:pointer\">＋ Add attachment<input id=\"attachment-input\" type=\"file\" multiple hidden /></label><div class=\"comments\"><div class=\"modal-label\" style=\"margin-top:0\">Activity</div>' + comments + '<div class=\"comment-compose\"><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span><textarea class=\"field input\" id=\"comment-input\" placeholder=\"Write a comment... (⌘ Enter to post)\"></textarea><button class=\"primary-btn\" data-action=\"add-comment\">Post</button></div></div></div><aside class=\"detail-side\"><div class=\"modal-label\" style=\"margin-top:0\">Add to card</div><button class=\"side-action\" data-action=\"set-due\">◷ ' + (card.due ? 'Due ' + formatDate(card.due) : 'Due date') + '</button>' + (card.due ? '<button class=\"side-action compact-action\" data-action=\"clear-due\">Remove due date</button>' : '') + '<button class=\"side-action\" data-action=\"add-label\">▰ Labels</button><button class=\"side-action\" data-action=\"add-member\">♙ Members</button>' + memberPicker + '<div class=\"modal-label\">Card actions</div><button class=\"side-action\" data-action=\"duplicate-card\">▣ Duplicate</button><button class=\"side-action\" data-action=\"archive-card\" style=\"color:#ff9e7a\">⌫ Archive card</button></aside></div></div></div></div>';
+  const closeButton = $('.modal-head .close', root);
+  closeButton?.insertAdjacentHTML('beforebegin', '<span class="card-save-status" role="status" aria-live="polite">' + esc(cardSaveStatus) + '</span>');
+  setCardSaveStatus(cardSaveStatus);
+  const commentComposer = $('.comment-compose', root);
+  if (commentComposer) commentComposer.innerHTML = '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span><div class="comment-editor"><textarea id="comment-input" placeholder="Write a comment..." aria-label="Write a comment"></textarea><div class="comment-editor-footer"><span class="comment-hint">⌘ Enter to post</span><button class="primary-btn comment-submit" data-action="add-comment">Post <kbd>⌘↵</kbd></button></div></div>';
   $('#detail-title').addEventListener('input', event => { selectedCard().card.title = event.target.value; persist(); });
   $('#detail-description').addEventListener('input', event => { selectedCard().card.description = event.target.value; persist(); });
   $('#attachment-input').addEventListener('change', handleAttachments);
