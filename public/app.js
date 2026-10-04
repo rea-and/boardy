@@ -448,10 +448,9 @@ function renderModal() {
   const descriptionLinks = extractUrls(card.description);
   if (descriptionLinks.length) {
     const linkRows = descriptionLinks.map(link => {
-      const label = link.href.replace(/^https?:\/\//, '').replace(/^www\./, '');
-      return '<a class="text-link description-link" href="' + esc(link.href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(link.href) + '"><span>↗</span><span>' + esc(label) + '</span><b>Open</b></a>';
+      return '<a class="text-link description-link" href="' + esc(link.href) + '" target="_blank" rel="noopener noreferrer" title="Open ' + esc(link.href) + '"><span>↗</span><span>' + esc(link.href) + '</span><b>Open link</b></a>';
     }).join('');
-    $('#detail-description', root)?.insertAdjacentHTML('afterend', '<div class="description-links"><div class="description-links-label">Links in description</div>' + linkRows + '</div>');
+    $('#detail-description', root)?.insertAdjacentHTML('afterend', '<div class="description-links"><div class="description-links-label">Links in description · click to open</div>' + linkRows + '</div>');
   }
   $('#detail-title').addEventListener('input', event => { selectedCard().card.title = event.target.value; persist(); });
   $('#detail-description').addEventListener('input', event => { selectedCard().card.description = event.target.value; persist(); });
