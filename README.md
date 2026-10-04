@@ -222,6 +222,16 @@ Health endpoint:
 curl -i http://127.0.0.1:4173/api/health
 ~~~
 
+## Updating a native systemd deployment
+
+From the repository root, run:
+
+~~~bash
+./deploy.sh
+~~~
+
+The script fast-forwards from `origin/main`, runs `npm run check`, restarts the `boardy` systemd service, and verifies the local health endpoint. It refuses to deploy while the checkout has uncommitted changes.
+
 View Docker logs:
 
 ~~~bash
