@@ -1,6 +1,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const appRoot = window.location.pathname === '/' ? '' : '/' + window.location.pathname.split('/').filter(Boolean)[0];
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+const isImageData = value => typeof value === 'string' && value.startsWith('data:image/');
 const uid = prefix => prefix + '_' + Math.random().toString(36).slice(2, 9);
 const initials = name => String(name || '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'YO';
 const formatDate = value => value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value)) : '';
@@ -135,6 +136,14 @@ function renderAuth(mode = 'login', error = '') {
   });
 }
 
+function applyBoardBackground(board = currentBoard()) {
+  const shell = $('.main-shell');
+  if (!shell) return;
+  const image = isImageData(board && board.background) ? 'url("' + board.background + '")' : '';
+  shell.style.backgroundImage = image;
+  shell.classList.toggle('has-board-background', Boolean(image));
+}
+
 function renderApp() {
   setPreferences();
   const board = currentBoard();
@@ -143,6 +152,8 @@ function renderApp() {
   const starredActive = state.view === 'starred' ? ' active' : '';
   const boards = state.boards.map(item => '<button class=\"board-nav' + (state.view === 'board' && item.id === board.id ? ' active' : '') + '\" data-action=\"select-board\" data-id=\"' + item.id + '\" title=\"' + esc(item.title) + '\"><i class=\"board-color board-color-button\" data-action=\"change-board-color\" data-id=\"' + item.id + '\" role=\"button\" tabindex=\"0\" aria-label=\"Change color for ' + esc(item.title) + '\" title=\"Change board color\" style=\"background:' + esc(item.color) + '\"></i><span class=\"nav-label\">' + esc(item.title) + '</span>' + (item.starred ? '<span class=\"board-star\">★</span>' : '') + '</button>').join('');
   $('#app').innerHTML = '<div class=\"app-shell ' + (state.sidebarCollapsed ? 'sidebar-collapsed' : '') + '\"><aside class=\"sidebar\" id=\"sidebar\"><div class=\"brand-row\"><div class=\"brand\"><span class=\"brand-mark\"><span></span><span></span></span><span class=\"brand-name\">Boardy</span></div><button class=\"icon-btn sidebar-collapse\" data-action=\"toggle-sidebar-collapse\" title=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\" aria-label=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\">' + (state.sidebarCollapsed ? '›' : '‹') + '</button></div><div class=\"workspace-label\">Workspace</div><div class=\"workspace\"><span class=\"workspace-avatar\">' + esc(initials(state.user.name)) + '</span><div><b>' + esc(state.user.name) + '\'s space</b><small>Personal workspace</small></div><span style=\"margin-left:auto;color:var(--muted-2)\">⌄</span></div><div class=\"side-section\"><div class=\"side-heading\">Views</div><button class=\"nav-item' + homeActive + '\" data-action=\"home\" title=\"All cards\"><span>◈</span> All cards</button><button class=\"nav-item' + starredActive + '\" data-action=\"starred\" title=\"Starred cards\"><span>☆</span> Starred cards</button></div><div class=\"side-section\"><div class=\"side-heading\">Your boards</div><div id=\"board-nav\">' + boards + '</div><button class=\"board-nav add-board\" data-action=\"add-board\" title=\"Create a board\"><span style=\"font-size:18px\">＋</span> Create a board</button></div><div class=\"sidebar-bottom\"><button class=\"nav-item\" data-action=\"settings\" title=\"Workspace settings\"><span>⚙</span> Workspace settings</button><div class=\"profile\"><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span><div class=\"profile-info\"><b>' + esc(state.user.name) + '</b><span>' + esc(state.user.email) + '</span></div><button class=\"icon-btn\" data-action=\"logout\" aria-label=\"Log out\" title=\"Log out\">↪</button></div></div></aside><main class=\"main-shell\"><header class=\"topbar\"><button class=\"icon-btn mobile-menu\" data-action=\"toggle-sidebar\" aria-label=\"Open navigation\">☰</button><label class=\"search\"><span>⌕</span><input id=\"search\" value=\"' + esc(state.query) + '\" placeholder=\"Search cards in this board\" /><button id=\"search-clear\" class=\"search-clear ' + (state.query ? '' : 'hidden') + '\" data-action=\"clear-search\" aria-label=\"Clear search\">×</button><kbd>⌘ K</kbd></label><div class=\"top-actions\"><button class=\"icon-btn\" data-action=\"shortcuts\" title=\"Keyboard shortcuts (?)\" aria-label=\"Keyboard shortcuts\">?</button><button class=\"icon-btn\" data-action=\"invite\" title=\"Invite people\" aria-label=\"Invite people\">♧</button><button class=\"icon-btn notification\" data-action=\"notifications\" title=\"Notifications\" aria-label=\"Notifications\">♢</button><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span></div></header><section class=\"board-head\"><div class=\"board-head-main\"><div class=\"board-title-line\"><button class=\"board-color board-color-button board-color-header\" data-action=\"change-board-color\" aria-label=\"Change board color\" title=\"Change board color\" style=\"background:' + esc(board.color) + '\"></button><h1 class=\"board-title\">' + esc(board.title) + '</h1><button class=\"icon-btn star-btn ' + (board.starred ? 'active' : '') + '\" data-action=\"toggle-star\" title=\"Star board\" aria-label=\"Star board\">★</button><button class=\"icon-btn\" data-action=\"rename-board\" title=\"Rename board\" aria-label=\"Rename board\">✎</button></div><button class=\"board-subtitle board-description-button\" data-action=\"edit-board-description\">' + esc(board.description || 'Add a board description') + '</button></div><div class=\"board-actions\"><button class=\"secondary-btn\" data-action=\"share\">♧ Share</button><button class=\"primary-btn\" data-action=\"add-card-top\">＋ Add card</button></div></section><section class=\"board-content\"><div class=\"board-toolbar\"><button class=\"toolbar-btn ' + (state.onlyDue ? 'active' : '') + '\" data-action=\"due-filter\">◷ Due soon</button><button class=\"toolbar-btn ' + (state.onlyStarred ? 'active' : '') + '\" data-action=\"starred-filter\">☆ Starred</button><button class=\"toolbar-btn\" data-action=\"settings\">⚙ Customize</button><span class=\"board-meta\">' + allCards(board).length + ' cards · Drag to reorder</span></div><div class=\"board-scroll\"><div class=\"columns\">' + renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button></div></div></section></main></div><div id=\"modal-root\"></div><div class=\"toast\"></div>';
+  applyBoardBackground(board);
+  $('.board-toolbar [data-action="settings"]')?.setAttribute('data-action', 'board-settings');
   $('#search').addEventListener('input', event => { state.query = event.target.value; $('#search-clear').classList.toggle('hidden', !state.query); renderBoardOnly(); });
   wireDragAndDrop();
   wireColumnDragAndDrop();
@@ -365,6 +376,7 @@ function renderModal() {
   const root = $('#modal-root');
   if (!modal) { if (root) root.innerHTML = ''; return; }
   if (modal.type === 'settings') return renderSettings();
+  if (modal.type === 'board-settings') return renderBoardSettings();
   if (modal.type === 'input') return renderInputModal();
   if (modal.type === 'label') return renderLabelModal();
   if (modal.type === 'board-color') return renderBoardColorModal();
@@ -397,6 +409,13 @@ function renderSettings() {
   $('#wallpaper-input').addEventListener('change', handleWallpaper);
   $('#backup-input').addEventListener('change', handleBackupImport);
 }
+function renderBoardSettings() {
+  const board = currentBoard();
+  const hasBackground = isImageData(board.background);
+  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Customize board</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><p class="modal-hint">Choose a background image for this board. Columns and cards will stay layered above it.</p><div class="board-background-preview" id="board-background-preview"><span>' + (hasBackground ? 'Current board background' : 'No board background selected') + '</span></div><div class="board-background-actions"><label class="secondary-btn">＋ Choose image<input id="board-background-input" type="file" accept="image/*" hidden /></label><button class="ghost-btn" data-action="clear-board-background" ' + (hasBackground ? '' : 'disabled') + '>Remove image</button></div><p class="modal-hint board-background-note">Images are kept in this workspace and included in backups. Maximum size: 4 MB.</p></div></div></div>';
+  if (hasBackground) $('#board-background-preview').style.backgroundImage = 'url("' + board.background + '")';
+  $('#board-background-input').addEventListener('change', handleBoardBackground);
+}
 const fileToDataUrl = file => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
 async function handleAttachments(event) {
   const card = selectedCard().card;
@@ -411,6 +430,13 @@ function handleWallpaper(event) {
   if (!file) return;
   if (file.size > 4000000) return notify('Wallpaper must be smaller than 4 MB');
   fileToDataUrl(file).then(data => { state.wallpaper = data; setPreferences(); persist(); renderSettings(); });
+}
+function handleBoardBackground(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return notify('Choose an image file');
+  if (file.size > 4000000) return notify('Board backgrounds must be smaller than 4 MB');
+  fileToDataUrl(file).then(data => { const board = currentBoard(); board.background = data; persist(); applyBoardBackground(board); renderBoardSettings(); notify('Board background updated'); });
 }
 function workspaceBackup() {
   return { format: backupFormat, version: backupVersion, exportedAt: new Date().toISOString(), data: { boards: state.boards, theme: state.theme, wallpaper: state.wallpaper, sidebarCollapsed: state.sidebarCollapsed } };
@@ -453,6 +479,8 @@ function handleAction(action, target) {
   }
   if (action === 'close-modal') return dismissModal();
   if (action === 'settings') { modal = { type: 'settings' }; return renderModal(); }
+  if (action === 'board-settings') { modal = { type: 'board-settings' }; return renderModal(); }
+  if (action === 'clear-board-background') { board.background = ''; persist(); applyBoardBackground(board); return renderBoardSettings(); }
   if (action === 'export-backup') return exportWorkspaceBackup();
   if (action === 'shortcuts') { modal = { type: 'shortcuts' }; return renderModal(); }
   if (action === 'toggle-sidebar') return $('#sidebar').classList.toggle('open');

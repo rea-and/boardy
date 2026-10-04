@@ -10,7 +10,7 @@ const dataDir = process.env.BOARDY_DATA_DIR || path.join(root, 'data');
 const dataFile = path.join(dataDir, 'boardy.json');
 const port = Number(process.env.PORT || 4173);
 const authAttempts = new Map();
-const validThemes = new Set(['dark', 'light', 'violet', 'ember', 'forest', 'contrast']);
+const validThemes = new Set(['dark', 'light', 'violet', 'ember', 'forest', 'contrast', 'paper', 'mint']);
 
 fs.mkdirSync(dataDir, { recursive: true });
 
