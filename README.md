@@ -1,79 +1,200 @@
 # Boardy
 
-Boardy is a self-hosted kanban workspace inspired by the best parts of Trello. It includes multiple boards, flexible lists, rich cards, labels, checklists, members, due dates, comments, attachments with image previews, search, starring, drag-and-drop movement, themes, and custom wallpapers.
+Boardy is a self-hosted kanban workspace inspired by the best parts of Trello. It includes multiple boards, flexible lists, rich cards, labels, checklists, members, due dates, comments, attachments with image previews, search, starring, drag-and-drop movement, themes, custom wallpapers, keyboard shortcuts, and portable workspace backups.
 
-The project is deliberately small and dependency-free: the browser client is served by a Node.js server, and workspace data is stored on disk so a single Ubuntu server can run it without a separate database.
+Boardy is intentionally small and dependency-free. The browser client is served by a Node.js server, and workspace data is stored on disk in a JSON file. It can run on a small Ubuntu server without a separate database.
 
 ## Requirements
 
-Choose one of these installation paths:
+- Node.js 20 or newer for a native installation.
+- Git.
+- An HTTPS reverse proxy for public production use.
+- A writable persistent data directory.
 
-- Docker Engine and Docker Compose plugin, recommended for Ubuntu production installs.
-- Node.js 20 or newer, for a direct installation.
+Docker users need Docker Engine and the Docker Compose plugin instead of a host Node.js installation.
 
-The app listens on port 4173 by default.
+Boardy listens on port 4173 by default.
 
-## Install with Docker on Ubuntu
+## Choose an installation method
+
+| Method | Best for | Persistent data |
+| --- | --- | --- |
+| Docker Compose | Fast deployment and simple upgrades | Named Docker volume |
+| Native Node.js + systemd | Full host and reverse-proxy control | Host directory |
+| Native Node.js foreground process | Local development and testing | ./data |
+
+For a public Ubuntu server, Docker Compose or native Node.js with systemd is recommended. Do not expose the application directly to the public internet without HTTPS.
+
+## Option A: Docker Compose
 
 ### 1. Install Docker
 
-On a fresh Ubuntu server, install Docker using Docker's official instructions for your Ubuntu release. Confirm that both commands work:
+Install Docker Engine and the Docker Compose plugin using the official instructions for your Ubuntu release. Confirm the installation:
 
 ~~~bash
 docker --version
 docker compose version
 ~~~
 
-### 2. Get Boardy
+If your account is not allowed to run Docker without sudo, either add it to the Docker group and start a new login session or prefix Docker commands with sudo.
 
-Replace the repository URL with the location where your Boardy source is stored:
+### 2. Clone the repository
+
+Replace the repository URL with your own Boardy repository URL:
 
 ~~~bash
-git clone <your-repository-url> boardy
-cd boardy
+sudo mkdir -p /opt/boardy
+sudo chown "$USER":"$USER" /opt/boardy
+git clone <your-repository-url> /opt/boardy
+cd /opt/boardy
 ~~~
 
-### 3. Build and start
+### 3. Build and start Boardy
 
 ~~~bash
 docker compose up -d --build
-~~~
-
-Check the container and health endpoint:
-
-~~~bash
 docker compose ps
-curl http://127.0.0.1:4173/api/health
+curl -fsS http://127.0.0.1:4173/api/health
 ~~~
 
-The expected health response contains "ok":true.
+The health response should contain:
 
-Open http://your-server-ip:4173 in a browser. Choose Open the demo workspace to inspect the product, or create a real account with an email address and a password of at least eight characters.
+~~~json
+{"ok":true,"service":"boardy"}
+~~~
 
-### 4. Stop, restart, and update
+For a local test, open http://SERVER_IP:4173. For production, keep port 4173 private and access Boardy through an HTTPS reverse proxy.
+
+### 4. Docker operations
 
 ~~~bash
+# Follow logs
+docker compose logs -f boardy
+
+# Restart
+docker compose restart boardy
+
+# Stop and start
 docker compose stop
 docker compose start
 
-# Pull source changes and rebuild:
-git pull
+# Update the source and rebuild
+git pull --ff-only
 docker compose up -d --build
 ~~~
 
-docker compose down removes the running container but keeps the named boardy-data volume. To remove the volume as well, use docker compose down -v; that permanently deletes the stored Boardy accounts and workspaces.
+docker compose down removes the container but keeps the named boardy-data volume. docker compose down -v also deletes that volume and permanently removes the stored accounts and workspaces. Only use it after taking a backup and confirming that data may be deleted.
 
-## Install directly with Node.js
+## Option B: Native Node.js with systemd
 
-### 1. Install Node.js 20+
+This is the recommended detailed installation for an Ubuntu server where Apache, Nginx, or Caddy will provide HTTPS.
 
-Verify the version:
+### 1. Install system packages
+
+~~~bash
+sudo apt update
+sudo apt install -y git curl ca-certificates
+~~~
+
+Install Node.js 20 or newer using your organization’s approved package source or the official Node.js distribution. Verify both Node and npm:
 
 ~~~bash
 node --version
+npm --version
 ~~~
 
-### 2. Start Boardy
+The Node version must be 20.x or newer:
+
+~~~bash
+node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 20) process.exit(1); console.log(process.versions.node)"
+~~~
+
+### 2. Create a service account and directories
+
+Using a dedicated operating-system account prevents Boardy from running as root:
+
+~~~bash
+sudo adduser --system --group --home /opt/boardy boardy
+sudo mkdir -p /opt/boardy /var/lib/boardy
+sudo chown -R boardy:boardy /opt/boardy /var/lib/boardy
+~~~
+
+If the application is installed elsewhere, use that location consistently in the commands and systemd unit below.
+
+### 3. Clone Boardy
+
+Replace the repository URL with your own:
+
+~~~bash
+sudo -u boardy git clone <your-repository-url> /opt/boardy
+sudo -u boardy npm --prefix /opt/boardy run check
+~~~
+
+Boardy has no runtime npm dependencies, so npm install is not required. npm run check validates the server and browser JavaScript.
+
+### 4. Create the systemd service
+
+Create /etc/systemd/system/boardy.service:
+
+~~~ini
+[Unit]
+Description=Boardy kanban workspace
+After=network.target
+
+[Service]
+Type=simple
+User=boardy
+Group=boardy
+WorkingDirectory=/opt/boardy
+Environment=NODE_ENV=production
+Environment=PORT=4173
+Environment=BOARDY_DATA_DIR=/var/lib/boardy
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+~~~
+
+If Node.js was installed with a version manager rather than system packages, find the absolute path with command -v node and use that path in ExecStart.
+
+Load and start the service:
+
+~~~bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now boardy
+sudo systemctl status boardy --no-pager
+~~~
+
+Verify the local service:
+
+~~~bash
+curl -i http://127.0.0.1:4173/api/health
+~~~
+
+Useful service commands:
+
+~~~bash
+sudo systemctl restart boardy
+sudo systemctl stop boardy
+sudo systemctl start boardy
+sudo journalctl -u boardy -f
+~~~
+
+### 5. Verify data-directory permissions
+
+The service account must be able to create and rename files in the configured data directory:
+
+~~~bash
+sudo chown -R boardy:boardy /var/lib/boardy
+sudo chmod 750 /var/lib/boardy
+sudo -u boardy sh -c 'touch /var/lib/boardy/.write-test && rm /var/lib/boardy/.write-test'
+~~~
+
+Boardy writes /var/lib/boardy/boardy.json atomically. Do not put the data directory inside a publicly served web root.
+
+## Option C: Local development
 
 ~~~bash
 git clone <your-repository-url> boardy
@@ -82,21 +203,23 @@ npm run check
 npm start
 ~~~
 
-No npm install step is required because Boardy uses only Node.js built-ins.
+Open http://localhost:4173.
 
-For development, use the file-watching server:
+For development with automatic server restarts:
 
 ~~~bash
 npm run dev
 ~~~
 
+The default local data file is ./data/boardy.json. The data/ directory is ignored by Git.
+
 ## Configuration
 
-The server accepts these environment variables:
+Boardy accepts these environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| PORT | 4173 | HTTP port for Boardy. |
+| PORT | 4173 | HTTP port used by Boardy. |
 | BOARDY_DATA_DIR | ./data | Directory containing the persistent boardy.json store. |
 | NODE_ENV | unset | Set to production to add the Secure cookie attribute. |
 
@@ -105,17 +228,19 @@ Example:
 ~~~bash
 NODE_ENV=production \
 PORT=4173 \
-BOARDY_DATA_DIR=/srv/boardy-data \
+BOARDY_DATA_DIR=/var/lib/boardy \
 npm start
 ~~~
 
-The Docker image sets NODE_ENV=production and stores data in /app/data, which is backed by the boardy-data Compose volume.
+For public HTTPS deployments, always set NODE_ENV=production.
 
-## HTTPS and reverse proxy
+## HTTPS and reverse proxies
 
-Do not expose a plain HTTP Boardy instance directly to the public internet. Put it behind an HTTPS reverse proxy. The proxy should forward requests to 127.0.0.1:4173 and preserve the Host header.
+The Boardy server provides HTTP locally. Put it behind an HTTPS reverse proxy for public use. The proxy should terminate TLS, forward requests to 127.0.0.1:4173, preserve the Host header, forward API requests, and keep the raw port 4173 inaccessible from the public internet.
 
-For Caddy:
+### Caddy on a dedicated hostname
+
+Add a site to the Caddy configuration:
 
 ~~~caddyfile
 boardy.example.com {
@@ -123,15 +248,26 @@ boardy.example.com {
 }
 ~~~
 
-For Nginx:
+Reload Caddy and confirm that the HTTPS hostname reaches Boardy.
+
+### Nginx on a dedicated hostname
 
 ~~~nginx
 server {
-    listen 443 ssl http2;
+    listen 80;
     server_name boardy.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name boardy.example.com;
+
+    # Configure ssl_certificate and ssl_certificate_key here.
 
     location / {
         proxy_pass http://127.0.0.1:4173;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -140,22 +276,26 @@ server {
 }
 ~~~
 
-### Apache under `/boardy/`
+Validate and reload:
 
-If Boardy should share `carlevato.net` with other applications, run it locally on port 4173 and proxy only the `/boardy/` path. Boardy is subpath-aware, so its assets and API requests stay under this prefix.
+~~~bash
+sudo nginx -t
+sudo systemctl reload nginx
+~~~
 
-Enable the required Apache modules once:
+### Apache under a URL path
+
+Boardy supports being hosted below a path such as https://example.com/boardy/.
+
+Enable the required Apache modules:
 
 ~~~bash
 sudo a2enmod proxy proxy_http headers rewrite ssl
 ~~~
 
-Add this block inside the existing HTTPS `<VirtualHost *:443>` in `/etc/apache2/sites-available/us-calendar-ssl.conf`. Put it before any broader Boardy or root proxy rules:
+Inside the HTTPS <VirtualHost *:443> for the desired domain, add:
 
 ~~~apache
-# ------------------------------------------------------------
-# Boardy at /boardy
-# ------------------------------------------------------------
 RedirectMatch permanent ^/boardy$ /boardy/
 
 ProxyPreserveHost On
@@ -171,26 +311,85 @@ ProxyPassReverse /boardy/     http://127.0.0.1:4173/
 </Location>
 ~~~
 
-Check and reload Apache:
+Put the specific /boardy/api/ proxy rules before broader proxy rules for the same host. Validate and reload:
 
 ~~~bash
 sudo apachectl configtest
 sudo systemctl reload apache2
 ~~~
 
-Because your port 80 virtual host redirects to HTTPS, use `https://carlevato.net/boardy/` as the final URL; `http://carlevato.net/boardy` will redirect there.
+The final URL must include the trailing slash:
 
-Use your certificate manager or hosting provider to provision and renew TLS certificates. Restrict the raw port 4173 with the server firewall once the proxy is working.
+~~~text
+https://example.com/boardy/
+~~~
 
-## Persistence and backups
+If a domain already redirects HTTP to HTTPS, use the HTTPS URL when testing cookies and authenticated changes.
 
-Boardy stores accounts, sessions, boards, comments, and attachment previews in boardy.json.
+## Updating a native systemd installation
 
-### In-app workspace backups
+The repository includes deploy.sh. It performs a fast-forward-only pull from origin/main, runs the JavaScript checks, restarts the boardy systemd service, waits for the health endpoint, and stops if the checkout has uncommitted changes.
 
-Open **Customize** → **Backup** to export a single portable JSON file for the signed-in workspace. It includes every board, card, attachment preview, theme, wallpaper, and sidebar preference. Use **Import** in the same panel to restore that backup to an account; importing replaces that account's current workspace after confirmation. Keep the exported file private because attachment data and board content are included.
+Run it from the repository root:
 
-For the Docker install, create a backup:
+~~~bash
+cd /opt/boardy
+./deploy.sh
+~~~
+
+The deployment account needs permission to restart the service with sudo. If the service has a different name or the repository lives elsewhere, update deploy.sh or perform the equivalent commands manually:
+
+~~~bash
+git pull --ff-only origin main
+npm run check
+sudo systemctl restart boardy
+curl -fsS http://127.0.0.1:4173/api/health
+~~~
+
+After an update, hard-refresh the browser if cached JavaScript is still displayed.
+
+## Data, backups, and restore
+
+Boardy stores accounts, sessions, boards, cards, comments, attachment previews, themes, wallpapers, and layout preferences in one boardy.json file.
+
+### In-app workspace backup
+
+Open Customize → Backup to export the signed-in workspace to one portable JSON file. It includes boards, cards, checklist data, labels, comments, attachments, theme, wallpaper, and sidebar preferences.
+
+Importing a backup replaces the current workspace after confirmation. Keep backup files private because they can contain board content, attachment data, and workspace information.
+
+### Native installation backup
+
+Stop Boardy before taking a filesystem backup:
+
+~~~bash
+sudo systemctl stop boardy
+sudo tar czf boardy-data-$(date +%Y%m%d-%H%M%S).tgz -C /var/lib boardy
+sudo systemctl start boardy
+~~~
+
+To restore a native backup, stop the service, move the current data directory to a safe recovery name, extract the backup, restore ownership, and start the service:
+
+~~~bash
+sudo systemctl stop boardy
+sudo mv /var/lib/boardy /var/lib/boardy-before-restore
+sudo mkdir -p /var/lib/boardy
+sudo tar xzf boardy-data-YYYYMMDD-HHMMSS.tgz -C /var/lib
+sudo chown -R boardy:boardy /var/lib/boardy
+sudo systemctl start boardy
+~~~
+
+Confirm the archive layout before restoring. Do not overwrite the only copy of the current data.
+
+### Docker backup
+
+Find the Compose volume:
+
+~~~bash
+docker volume ls | grep boardy
+~~~
+
+Then back it up to a local backups directory:
 
 ~~~bash
 mkdir -p backups
@@ -200,80 +399,84 @@ docker run --rm \
   alpine tar czf /backup/boardy-data-$(date +%Y%m%d-%H%M%S).tgz -C /source .
 ~~~
 
-The exact volume name can be checked with:
+Replace boardy_boardy-data with the actual volume name shown by docker volume ls.
 
-~~~bash
-docker volume ls | grep boardy
-~~~
-
-For a native install, back up the configured data directory while Boardy is stopped:
-
-~~~bash
-tar czf boardy-data-backup.tgz data/
-~~~
-
-Uploaded files are currently stored as size-limited data URLs in the workspace JSON. Keep regular backups and avoid very large uploads. A future larger deployment should use object storage for attachments and a transactional database for workspace data.
+Attachments are currently stored as size-limited data URLs inside the JSON store. Keep regular backups and avoid very large uploads. A larger deployment should move attachments to object storage and persistence to a transactional database.
 
 ## Health checks and troubleshooting
 
-Health endpoint:
+### Check the application directly
 
 ~~~bash
 curl -i http://127.0.0.1:4173/api/health
+sudo systemctl status boardy --no-pager
+sudo journalctl -u boardy -n 100 --no-pager
 ~~~
 
-## Updating a native systemd deployment
+### Check a reverse proxy
 
-From the repository root, run:
+For Apache:
 
 ~~~bash
-./deploy.sh
+sudo apachectl configtest
+sudo tail -f /var/log/apache2/<your-ssl-access-log>
+sudo tail -f /var/log/apache2/<your-ssl-error-log>
 ~~~
 
-The script fast-forwards from `origin/main`, runs `npm run check`, restarts the `boardy` systemd service, and verifies the local health endpoint. It refuses to deploy while the checkout has uncommitted changes.
-
-View Docker logs:
+For Nginx:
 
 ~~~bash
-docker compose logs -f boardy
+sudo nginx -t
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
 ~~~
 
-Common fixes:
+When saving a Boardy change, the proxy access log should show:
 
-- **Port already in use:** set another host port in docker-compose.yml, for example "8080:4173", then open port 8080.
-- **Container starts but data is missing:** confirm the boardy-data volume is still present with docker volume ls.
-- **Login cookie does not persist behind HTTPS:** ensure the proxy is serving HTTPS and NODE_ENV=production is set.
-- **The page is stale after an update:** rebuild with docker compose up -d --build and hard-refresh the browser.
-- **Permission errors in native mode:** ensure the account running Node can read and write BOARDY_DATA_DIR.
+~~~text
+PUT /boardy/api/data HTTP/1.1" 200
+~~~
 
-## Product behavior
+Common issues:
 
-- Create an account or use the demo workspace.
-- Create multiple boards and lists.
-- Add cards through branded dialogs.
-- Open cards to edit descriptions, labels, due dates, checklists, comments, members, and attachments.
-- Drag cards between lists.
-- Star boards and cards, then use the starred filter.
-- Search across the active board.
-- Switch between dark/light themes and choose a preset or uploaded wallpaper.
-- Changes are saved automatically to the server.
+- Unit boardy.service does not exist: create /etc/systemd/system/boardy.service, then run sudo systemctl daemon-reload.
+- EACCES for the data directory: make BOARDY_DATA_DIR writable by the service account and verify with the touch test above.
+- Port 4173 refuses connections after restart: wait for systemd to finish restarting and inspect sudo journalctl -u boardy -n 100 --no-pager.
+- The page loads but changes do not persist: confirm the browser is using the production URL, hard-refresh it, and verify a PUT /api/data request returns 200.
+- The log shows 401: the secure session cookie is missing or expired. Confirm HTTPS is active and NODE_ENV=production is set.
+- The log shows 404 for /boardy/api/data: check the path-specific proxy rules and reload Apache or Nginx.
+- The log shows 500: inspect the Boardy journal immediately after reproducing the action.
+- The page is stale after an update: run the deployment command, then hard-refresh with Ctrl+Shift+R.
+- The app starts but data appears missing: confirm that the service uses the intended BOARDY_DATA_DIR and that the backup volume or directory has not changed.
+
+## First use
+
+1. Open Boardy through the HTTPS URL.
+2. Choose Create an account and use a valid email address and a password of at least eight characters.
+3. Or choose Open the demo workspace to explore the interface without creating an account.
+4. Create a board and lists, then add cards.
+5. Open a card to edit descriptions, labels, due dates, checklists, members, comments, and attachments.
+6. Use Customize to select a theme, wallpaper, and backup actions.
+7. Export a backup before major changes or upgrades.
+
+## Product capabilities
+
+- Account registration, login, logout, and password hashing with Node.js scrypt.
+- Multiple boards, lists, and cards.
+- Card descriptions, labels, due dates, checklists, members, comments, attachments, previews, starring, duplication, and archiving.
+- Drag-and-drop card movement and list reordering.
+- Search and due/starred filters.
+- Themes, custom wallpapers, responsive layout, and a collapsible sidebar.
+- Keyboard shortcuts.
+- JSON export/import workspace backups.
+- Automatic persistence through the authenticated /api/data endpoint.
 
 ## Security notes
 
-- Passwords are salted and hashed with Node.js scrypt.
-- Sessions use random HttpOnly cookies.
-- Repeated failed authentication attempts are throttled per client address.
-- Production mode adds the Secure cookie attribute.
-- The server applies baseline browser security headers.
-- The app does not log passwords, session tokens, or uploaded content.
-- Use HTTPS, a firewall, regular backups, and a private deployment for real production use.
-
-## Development checks
-
-Run the syntax checks before handing off changes:
-
-~~~bash
-npm run check
-~~~
-
-The repository also includes AGENTS.md, the requested compatibility file ANGENTS.md, and CLAUDE.md with project-specific coding and deployment guidance.
+- Always use HTTPS for public deployments.
+- Keep boardy.json and its containing data directory outside any web root.
+- Run the service as a dedicated non-root operating-system account.
+- Keep backup files private.
+- Restrict direct access to port 4173 when a reverse proxy is configured.
+- Do not commit data/boardy.json, credentials, session cookies, or uploaded personal files.
+- The built-in JSON store is intended for a small self-hosted installation. Use a database and object storage for larger multi-user deployments.
