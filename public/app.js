@@ -189,6 +189,7 @@ function renderApp() {
   $('#search').addEventListener('input', event => { state.query = event.target.value; $('#search-clear').classList.toggle('hidden', !state.query); renderBoardOnly(); });
   wireDragAndDrop();
   wireColumnDragAndDrop();
+  markTruncatedDescriptions();
 }
 function renderEmptyWorkspace() { const hasArchived = state.boards.some(board => board.archived); $('#app').innerHTML = '<div class=\"empty\" style=\"min-height:100vh;display:grid;place-items:center\"><div><strong>' + (hasArchived ? 'Your active boards are clear.' : 'Your workspace is ready.') + '</strong><span>' + (hasArchived ? 'Restore an archived board or create a new one.' : 'Create your first board to get started.') + '</span><div class=\"empty-actions\"><button class=\"primary-btn\" data-action=\"add-board\">Create a board</button>' + (hasArchived ? '<button class=\"secondary-btn\" data-action=\"archived-boards\">View archived boards</button>' : '') + '</div></div></div><div id=\"modal-root\"></div><div class=\"toast\"></div>'; }
 function renderColumns(board) {
@@ -206,7 +207,8 @@ function renderCard(card, list) {
   const footer = (card.due ? '<span class=\"card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '\">◷ ' + formatDate(card.due) + '</span>' : '') + (total ? '<span class=\"card-stat progress\"><span class=\"progress-bar\"><i style=\"width:' + Math.round(done / total * 100) + '%\"></i></span>' + done + '/' + total + '</span>' : '') + (card.attachments && card.attachments.length ? '<span class=\"card-stat\">⌕ ' + card.attachments.length + '</span>' : '') + '<div class=\"avatars\">' + people + '</div>';
   return '<article class=\"card\" draggable=\"true\" data-action=\"open-card\" data-id=\"' + card.id + '\" data-list=\"' + list.id + '\">' + labels + '<div class=\"card-topline\"><div class=\"card-title\">' + esc(card.title) + '</div><button class=\"card-star ' + (card.starred ? 'active' : '') + '\" data-action=\"toggle-card-star\" data-id=\"' + card.id + '\" data-list=\"' + list.id + '\" title=\"Star card\">★</button></div>' + (card.description ? '<div class=\"card-description\">' + linkify(card.description) + '</div>' : '') + '<div class=\"card-footer\">' + footer + '</div></article>';
 }
-function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button>'; $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); } }
+function markTruncatedDescriptions(root = document) { root.querySelectorAll('.card-description').forEach(description => description.classList.toggle('is-truncated', description.scrollHeight > description.clientHeight + 1)); }
+function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button>'; $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); markTruncatedDescriptions(); } }
 
 function openInputModal(config) { modal = { type: 'input', ...config }; renderModal(); }
 function openLabelModal() {
