@@ -439,7 +439,7 @@ function handleAction(action, target) {
   if (action === 'toggle-sidebar') return $('#sidebar').classList.toggle('open');
   if (action === 'toggle-sidebar-collapse') { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); return renderApp(); }
   if (action === 'clear-search') { state.query = ''; renderApp(); $('#search').focus(); return; }
-  if (action === 'select-board') { state.boardId = target.dataset.id; state.query = ''; return renderApp(); }
+  if (action === 'select-board') { state.boardId = target.dataset.id; state.query = ''; $('#sidebar')?.classList.remove('open'); return renderApp(); }
   if (action === 'change-board-color') return openBoardColorModal(state.boards.find(item => item.id === target.dataset.id) || board);
   if (action === 'home') { state.onlyStarred = false; state.onlyDue = false; return renderApp(); }
   if (action === 'starred') { state.onlyStarred = true; state.onlyDue = false; return renderApp(); }
@@ -518,6 +518,8 @@ function handleAction(action, target) {
 }
 
 document.addEventListener('click', event => {
+  const sidebar = $('#sidebar');
+  if (window.innerWidth <= 900 && sidebar?.classList.contains('open') && !event.target.closest('#sidebar') && !event.target.closest('[data-action="toggle-sidebar"]')) sidebar.classList.remove('open');
   const target = event.target.closest('[data-action]');
   if (!target) return;
   if (target.dataset.action === 'close-modal' && event.target.closest('[data-stop]') && !event.target.classList.contains('close')) return;
@@ -525,6 +527,7 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('click', event => { if (event.target.matches('.modal-layer')) dismissModal(); });
 document.addEventListener('keydown', event => {
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-action="change-board-color"]')) { event.preventDefault(); handleAction('change-board-color', event.target); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search') && $('#search').focus(); }
   if (event.key === 'Escape' && modal) dismissModal();
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && modal && modal.type === 'card' && document.activeElement === $('#comment-input')) {
