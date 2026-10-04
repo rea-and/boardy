@@ -22,9 +22,12 @@ const themeOptions = [
   { id: 'violet', name: 'Violet hour', preview: 'violet' },
   { id: 'ember', name: 'Ember', preview: 'ember' },
   { id: 'forest', name: 'Forest', preview: 'forest' },
-  { id: 'contrast', name: 'High contrast', preview: 'contrast' }
+  { id: 'contrast', name: 'High contrast', preview: 'contrast' },
+  { id: 'paper', name: 'Paper', preview: 'paper' },
+  { id: 'mint', name: 'Mint', preview: 'mint' }
 ];
-const themeColors = { dark: '#0e1524', light: '#eef3f8', violet: '#18152f', ember: '#211512', forest: '#10221e', contrast: '#06080c' };
+const themeColors = { dark: '#0e1524', light: '#eef3f8', violet: '#18152f', ember: '#211512', forest: '#10221e', contrast: '#06080c', paper: '#f5f1e8', mint: '#edf7f3' };
+const lightThemeBackgrounds = { light: '#eef3f8', paper: '#f5f1e8', mint: '#edf7f3' };
 const boardColorOptions = [
   { color: '#17b897', name: 'Teal' },
   { color: '#8f7aea', name: 'Violet' },
@@ -97,7 +100,7 @@ function moveList(listId, targetListId, placeAfter = false) {
 function setPreferences() {
   document.documentElement.dataset.theme = state.theme;
   document.querySelector('meta[name=\"theme-color\"]')?.setAttribute('content', themeColors[state.theme] || themeColors.dark);
-  const background = state.wallpaper && state.wallpaper.startsWith('data:') ? 'url(\"' + state.wallpaper + '\")' : (state.theme === 'light' ? '#eef3f8' : (wallpaperMap[state.wallpaper] || wallpaperMap.aurora));
+  const background = state.wallpaper && state.wallpaper.startsWith('data:') ? 'url(\"' + state.wallpaper + '\")' : (lightThemeBackgrounds[state.theme] || wallpaperMap[state.wallpaper] || wallpaperMap.aurora);
   document.documentElement.style.setProperty('--wallpaper', background);
 }
 function persist() {
