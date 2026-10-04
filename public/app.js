@@ -219,7 +219,12 @@ function openLabelModal() {
 function openCardCreateModal() { modal = { type: 'create-card' }; renderModal(); }
 function openShareModal() { modal = { type: 'share' }; renderModal(); }
 function openConfirmModal(config) { modal = { type: 'confirm', previousModal: modal, ...config }; renderModal(); }
-function dismissModal() { modal = modal && modal.previousModal ? modal.previousModal : null; renderModal(); }
+function dismissModal() {
+  const wasCard = modal?.type === 'card';
+  modal = modal && modal.previousModal ? modal.previousModal : null;
+  renderModal();
+  if (wasCard && !modal) renderBoardOnly();
+}
 function renderInputModal() {
   const inputType = modal.inputType || 'text';
   $('#modal-root').innerHTML = '<div class=\"modal-layer\" data-action=\"close-modal\"><div class=\"modal modal--small\" data-stop><div class=\"modal-head\"><h2>' + esc(modal.heading) + '</h2><button class=\"icon-btn close\" data-action=\"close-modal\">×</button></div><form class=\"modal-form\" id=\"input-modal-form\"><div class=\"modal-body\"><div class=\"field\"><label for=\"input-modal-value\">' + esc(modal.label || 'Name') + '</label><input class=\"inline-input\" id=\"input-modal-value\" type=\"' + inputType + '\" value=\"' + esc(modal.value || '') + '\" placeholder=\"' + esc(modal.placeholder || '') + '\" autocomplete=\"off\" required /></div>' + (modal.hint ? '<p class=\"modal-hint\">' + esc(modal.hint) + '</p>' : '') + '</div><div class=\"modal-form-footer\"><button type=\"button\" class=\"ghost-btn close\" data-action=\"close-modal\">Cancel</button><button type=\"submit\" class=\"primary-btn\">' + esc(modal.submitLabel || 'Save') + '</button></div></form></div></div>';
