@@ -74,6 +74,14 @@ function moveCard(cardId, fromListId, toListId, targetCardId = null, placeAfter 
   renderBoardOnly();
   return true;
 }
+function cardDropPosition(column, clientY) {
+  const cards = [...column.querySelectorAll('.card[draggable="true"]')].filter(card => !dragState || card.dataset.id !== dragState.cardId);
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) return { targetCardId: card.dataset.id, placeAfter: false };
+  }
+  return { targetCardId: cards.length ? cards[cards.length - 1].dataset.id : null, placeAfter: true };
+}
 function moveList(listId, targetListId, placeAfter = false) {
   const board = currentBoard();
   const sourceIndex = board.lists.findIndex(list => list.id === listId);
@@ -262,15 +270,19 @@ function wireDragAndDrop() {
       dragState = { cardId: card.dataset.id, listId: card.dataset.list };
       card.classList.add('is-dragging');
       event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', card.dataset.id);
     });
-    card.addEventListener('dragend', () => { dragState = null; card.classList.remove('is-dragging'); document.querySelectorAll('.column').forEach(column => column.classList.remove('is-drag-target')); });
+    card.addEventListener('dragend', () => { dragState = null; card.classList.remove('is-dragging'); document.querySelectorAll('.card').forEach(item => item.classList.remove('is-drop-before', 'is-drop-after')); document.querySelectorAll('.column').forEach(column => column.classList.remove('is-drag-target')); });
     card.addEventListener('dragover', event => {
       if (!dragState || dragState.cardId === card.dataset.id) return;
       event.preventDefault();
       event.stopPropagation();
-      card.classList.toggle('is-drop-after', event.clientY > card.getBoundingClientRect().top + card.offsetHeight / 2);
+      const placeAfter = event.clientY > card.getBoundingClientRect().top + card.offsetHeight / 2;
+      document.querySelectorAll('.card').forEach(item => { if (item !== card) item.classList.remove('is-drop-before', 'is-drop-after'); });
+      card.classList.toggle('is-drop-before', !placeAfter);
+      card.classList.toggle('is-drop-after', placeAfter);
     });
-    card.addEventListener('dragleave', () => card.classList.remove('is-drop-after'));
+    card.addEventListener('dragleave', () => card.classList.remove('is-drop-before', 'is-drop-after'));
     card.addEventListener('drop', event => {
       if (!dragState || dragState.cardId === card.dataset.id) return;
       event.preventDefault();
@@ -289,7 +301,8 @@ function wireDragAndDrop() {
       event.preventDefault();
       column.classList.remove('is-drag-target');
       if (!dragState) return;
-      const moved = moveCard(dragState.cardId, dragState.listId, column.dataset.list);
+      const position = cardDropPosition(column, event.clientY);
+      const moved = moveCard(dragState.cardId, dragState.listId, column.dataset.list, position.targetCardId, position.placeAfter);
       if (moved) notify('Card moved to ' + currentBoard().lists.find(list => list.id === column.dataset.list).title);
       dragState = null;
     });
