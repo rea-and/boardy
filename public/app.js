@@ -378,7 +378,7 @@ function handleAction(action, target) {
   if (action === 'due-filter') { state.onlyDue = !state.onlyDue; return renderApp(); }
   if (action === 'starred-filter') { state.onlyStarred = !state.onlyStarred; return renderApp(); }
   if (action === 'add-board') return openInputModal({ heading: 'Create a board', label: 'Board name', placeholder: 'e.g. Product launch', submitLabel: 'Create board', onSubmit: title => {
-    const newBoard = { id: uid('board'), title, description: 'A fresh space for focused work.', color: '#8f7aea', background: 'aurora', starred: false, members: [], lists: [{ id: uid('list'), title: 'To do', cards: [] }, { id: uid('list'), title: 'In progress', cards: [] }, { id: uid('list'), title: 'Done', cards: [] }] };
+    const newBoard = { id: uid('board'), title, description: '', color: '#8f7aea', background: 'aurora', starred: false, members: [], lists: [{ id: uid('list'), title: 'To do', cards: [] }, { id: uid('list'), title: 'In progress', cards: [] }, { id: uid('list'), title: 'Done', cards: [] }] };
     state.boards.push(newBoard); state.boardId = newBoard.id; persist(); renderApp();
   }});
   if (action === 'rename-board') return openInputModal({ heading: 'Rename board', label: 'Board name', value: board.title, submitLabel: 'Save changes', onSubmit: title => { board.title = title; persist(); renderApp(); }});
