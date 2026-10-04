@@ -1,11 +1,16 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const appRoot = window.location.pathname === '/' ? '' : '/' + window.location.pathname.split('/').filter(Boolean)[0];
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
-const linkify = (value = '') => esc(value).replace(/(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/g, raw => {
+const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/g;
+const normalizeUrl = raw => {
   const trailing = (raw.match(/[.,!?;:)\]]+$/) || [''])[0];
   const url = trailing ? raw.slice(0, -trailing.length) : raw;
-  const href = url.startsWith('www.') ? 'https://' + url : url;
-  return '<a class="text-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + url + '</a>' + trailing;
+  return { href: url.startsWith('www.') ? 'https://' + url : url, trailing };
+};
+const extractUrls = (value = '') => Array.from(String(value).matchAll(urlPattern), match => normalizeUrl(match[0])).filter((link, index, links) => links.findIndex(item => item.href === link.href) === index).slice(0, 5);
+const linkify = (value = '') => esc(value).replace(urlPattern, raw => {
+  const { href, trailing } = normalizeUrl(raw);
+  return '<a class="text-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + href + '</a>' + trailing;
 });
 const isImageData = value => typeof value === 'string' && value.startsWith('data:image/');
 const uid = prefix => prefix + '_' + Math.random().toString(36).slice(2, 9);
@@ -431,6 +436,14 @@ function renderModal() {
   setCardSaveStatus(cardSaveStatus);
   const commentComposer = $('.comment-compose', root);
   if (commentComposer) commentComposer.innerHTML = '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span><div class="comment-editor"><textarea id="comment-input" placeholder="Write a comment..." aria-label="Write a comment"></textarea><div class="comment-editor-footer"><span class="comment-hint">⌘ Enter to post</span><button class="primary-btn comment-submit" data-action="add-comment">Post <kbd>⌘↵</kbd></button></div></div>';
+  const descriptionLinks = extractUrls(card.description);
+  if (descriptionLinks.length) {
+    const linkRows = descriptionLinks.map(link => {
+      const label = link.href.replace(/^https?:\/\//, '').replace(/^www\./, '');
+      return '<a class="text-link description-link" href="' + esc(link.href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(link.href) + '"><span>↗</span><span>' + esc(label) + '</span><b>Open</b></a>';
+    }).join('');
+    $('#detail-description', root)?.insertAdjacentHTML('afterend', '<div class="description-links"><div class="description-links-label">Links in description</div>' + linkRows + '</div>');
+  }
   $('#detail-title').addEventListener('input', event => { selectedCard().card.title = event.target.value; persist(); });
   $('#detail-description').addEventListener('input', event => { selectedCard().card.description = event.target.value; persist(); });
   $('#attachment-input').addEventListener('change', handleAttachments);
