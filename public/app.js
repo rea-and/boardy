@@ -62,7 +62,8 @@ function notify(message) {
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => toast.classList.remove('show'), 2400);
 }
-function currentBoard() { return state.boards.find(board => board.id === state.boardId) || state.boards[0]; }
+function firstActiveBoard() { return state.boards.find(board => !board.archived); }
+function currentBoard() { return state.boards.find(board => board.id === state.boardId && !board.archived) || firstActiveBoard(); }
 function allCards(board = currentBoard()) { return (board && board.lists || []).flatMap(list => list.cards.map(card => ({ card, list }))); }
 function moveCard(cardId, fromListId, toListId, targetCardId = null, placeAfter = false) {
   const board = currentBoard();
@@ -112,7 +113,7 @@ function persist() {
   }, 350);
 }
 function applySession(result) {
-  state = { ...state, ...result.data, user: result.user, boardId: result.data.boards[0] ? result.data.boards[0].id : null };
+  state = { ...state, ...result.data, user: result.user, boardId: (result.data.boards.find(board => !board.archived) || result.data.boards[0])?.id || null };
   setPreferences();
   renderApp();
 }
@@ -153,13 +154,16 @@ function renderApp() {
   const boards = state.boards.map(item => '<button class=\"board-nav' + (state.view === 'board' && item.id === board.id ? ' active' : '') + '\" data-action=\"select-board\" data-id=\"' + item.id + '\" title=\"' + esc(item.title) + '\"><i class=\"board-color board-color-button\" data-action=\"change-board-color\" data-id=\"' + item.id + '\" role=\"button\" tabindex=\"0\" aria-label=\"Change color for ' + esc(item.title) + '\" title=\"Change board color\" style=\"background:' + esc(item.color) + '\"></i><span class=\"nav-label\">' + esc(item.title) + '</span>' + (item.starred ? '<span class=\"board-star\">★</span>' : '') + '</button>').join('');
   $('#app').innerHTML = '<div class=\"app-shell ' + (state.sidebarCollapsed ? 'sidebar-collapsed' : '') + '\"><aside class=\"sidebar\" id=\"sidebar\"><div class=\"brand-row\"><div class=\"brand\"><span class=\"brand-mark\"><span></span><span></span></span><span class=\"brand-name\">Boardy</span></div><button class=\"icon-btn sidebar-collapse\" data-action=\"toggle-sidebar-collapse\" title=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\" aria-label=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\">' + (state.sidebarCollapsed ? '›' : '‹') + '</button></div><div class=\"workspace-label\">Workspace</div><div class=\"workspace\"><span class=\"workspace-avatar\">' + esc(initials(state.user.name)) + '</span><div><b>' + esc(state.user.name) + '\'s space</b><small>Personal workspace</small></div><span style=\"margin-left:auto;color:var(--muted-2)\">⌄</span></div><div class=\"side-section\"><div class=\"side-heading\">Views</div><button class=\"nav-item' + homeActive + '\" data-action=\"home\" title=\"All cards\"><span>◈</span> All cards</button><button class=\"nav-item' + starredActive + '\" data-action=\"starred\" title=\"Starred cards\"><span>☆</span> Starred cards</button></div><div class=\"side-section\"><div class=\"side-heading\">Your boards</div><div id=\"board-nav\">' + boards + '</div><button class=\"board-nav add-board\" data-action=\"add-board\" title=\"Create a board\"><span style=\"font-size:18px\">＋</span> Create a board</button></div><div class=\"sidebar-bottom\"><button class=\"nav-item\" data-action=\"settings\" title=\"Workspace settings\"><span>⚙</span> Workspace settings</button><div class=\"profile\"><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span><div class=\"profile-info\"><b>' + esc(state.user.name) + '</b><span>' + esc(state.user.email) + '</span></div><button class=\"icon-btn\" data-action=\"logout\" aria-label=\"Log out\" title=\"Log out\">↪</button></div></div></aside><main class=\"main-shell\"><header class=\"topbar\"><button class=\"icon-btn mobile-menu\" data-action=\"toggle-sidebar\" aria-label=\"Open navigation\">☰</button><label class=\"search\"><span>⌕</span><input id=\"search\" value=\"' + esc(state.query) + '\" placeholder=\"Search cards in this board\" /><button id=\"search-clear\" class=\"search-clear ' + (state.query ? '' : 'hidden') + '\" data-action=\"clear-search\" aria-label=\"Clear search\">×</button><kbd>⌘ K</kbd></label><div class=\"top-actions\"><button class=\"icon-btn\" data-action=\"shortcuts\" title=\"Keyboard shortcuts (?)\" aria-label=\"Keyboard shortcuts\">?</button><button class=\"icon-btn\" data-action=\"invite\" title=\"Invite people\" aria-label=\"Invite people\">♧</button><button class=\"icon-btn notification\" data-action=\"notifications\" title=\"Notifications\" aria-label=\"Notifications\">♢</button><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span></div></header><section class=\"board-head\"><div class=\"board-head-main\"><div class=\"board-title-line\"><button class=\"board-color board-color-button board-color-header\" data-action=\"change-board-color\" aria-label=\"Change board color\" title=\"Change board color\" style=\"background:' + esc(board.color) + '\"></button><h1 class=\"board-title\">' + esc(board.title) + '</h1><button class=\"icon-btn star-btn ' + (board.starred ? 'active' : '') + '\" data-action=\"toggle-star\" title=\"Star board\" aria-label=\"Star board\">★</button><button class=\"icon-btn\" data-action=\"rename-board\" title=\"Rename board\" aria-label=\"Rename board\">✎</button></div><button class=\"board-subtitle board-description-button\" data-action=\"edit-board-description\">' + esc(board.description || 'Add a board description') + '</button></div><div class=\"board-actions\"><button class=\"secondary-btn\" data-action=\"share\">♧ Share</button><button class=\"primary-btn\" data-action=\"add-card-top\">＋ Add card</button></div></section><section class=\"board-content\"><div class=\"board-toolbar\"><button class=\"toolbar-btn ' + (state.onlyDue ? 'active' : '') + '\" data-action=\"due-filter\">◷ Due soon</button><button class=\"toolbar-btn ' + (state.onlyStarred ? 'active' : '') + '\" data-action=\"starred-filter\">☆ Starred</button><button class=\"toolbar-btn\" data-action=\"settings\">⚙ Customize</button><span class=\"board-meta\">' + allCards(board).length + ' cards · Drag to reorder</span></div><div class=\"board-scroll\"><div class=\"columns\">' + renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button></div></div></section></main></div><div id=\"modal-root\"></div><div class=\"toast\"></div>';
   $('.board-meta').textContent = allCards(board).length + ' cards';
+  document.querySelectorAll('#board-nav .board-nav[data-id]').forEach(item => { if (state.boards.find(boardItem => boardItem.id === item.dataset.id)?.archived) item.remove(); });
+  const archivedCount = state.boards.filter(item => item.archived).length;
+  if (archivedCount) $('#board-nav')?.insertAdjacentHTML('afterend', '<button class="nav-item archived-nav" data-action="archived-boards" title="Archived boards"><span>▣</span> Archived boards <small class="archived-count">' + archivedCount + '</small></button>');
   applyBoardBackground(board);
   $('.board-toolbar [data-action="settings"]')?.setAttribute('data-action', 'board-settings');
   $('#search').addEventListener('input', event => { state.query = event.target.value; $('#search-clear').classList.toggle('hidden', !state.query); renderBoardOnly(); });
   wireDragAndDrop();
   wireColumnDragAndDrop();
 }
-function renderEmptyWorkspace() { $('#app').innerHTML = '<div class=\"empty\" style=\"min-height:100vh;display:grid;place-items:center\"><div><strong>Your workspace is ready.</strong><button class=\"primary-btn\" data-action=\"add-board\">Create your first board</button></div></div>'; }
+function renderEmptyWorkspace() { const hasArchived = state.boards.some(board => board.archived); $('#app').innerHTML = '<div class=\"empty\" style=\"min-height:100vh;display:grid;place-items:center\"><div><strong>' + (hasArchived ? 'Your active boards are clear.' : 'Your workspace is ready.') + '</strong><span>' + (hasArchived ? 'Restore an archived board or create a new one.' : 'Create your first board to get started.') + '</span><div class=\"empty-actions\"><button class=\"primary-btn\" data-action=\"add-board\">Create a board</button>' + (hasArchived ? '<button class=\"secondary-btn\" data-action=\"archived-boards\">View archived boards</button>' : '') + '</div></div></div><div id=\"modal-root\"></div><div class=\"toast\"></div>'; }
 function renderColumns(board) {
   const search = state.query.toLowerCase().trim();
   return (board.lists || []).map(list => {
@@ -378,6 +382,7 @@ function renderModal() {
   if (!modal) { if (root) root.innerHTML = ''; return; }
   if (modal.type === 'settings') return renderSettings();
   if (modal.type === 'board-settings') return renderBoardSettings();
+  if (modal.type === 'archived-boards') return renderArchivedBoards();
   if (modal.type === 'input') return renderInputModal();
   if (modal.type === 'label') return renderLabelModal();
   if (modal.type === 'board-color') return renderBoardColorModal();
@@ -416,6 +421,12 @@ function renderBoardSettings() {
   $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Customize board</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><p class="modal-hint">Choose a background image for this board. Columns and cards will stay layered above it.</p><div class="board-background-preview" id="board-background-preview"><span>' + (hasBackground ? 'Current board background' : 'No board background selected') + '</span></div><div class="board-background-actions"><label class="secondary-btn">＋ Choose image<input id="board-background-input" type="file" accept="image/*" hidden /></label><button class="ghost-btn" data-action="clear-board-background" ' + (hasBackground ? '' : 'disabled') + '>Remove image</button></div><p class="modal-hint board-background-note">Images are kept in this workspace and included in backups. Maximum size: 4 MB.</p></div></div></div>';
   if (hasBackground) $('#board-background-preview').style.backgroundImage = 'url("' + board.background + '")';
   $('#board-background-input').addEventListener('change', handleBoardBackground);
+  $('#modal-root .modal-body').insertAdjacentHTML('beforeend', '<div class="modal-label">Board actions</div><div class="board-danger-actions"><button class="secondary-btn" data-action="archive-board">Archive board</button><button class="danger-btn" data-action="delete-board">Delete board</button></div>');
+}
+function renderArchivedBoards() {
+  const archived = state.boards.filter(board => board.archived);
+  const rows = archived.length ? archived.map(board => '<div class="archived-board-row"><div><strong>' + esc(board.title) + '</strong><span>' + allCards(board).length + ' cards</span></div><div class="archived-board-actions"><button class="secondary-btn" data-action="unarchive-board" data-id="' + board.id + '">Restore</button><button class="ghost-btn archived-delete" data-action="delete-board" data-id="' + board.id + '">Delete</button></div></div>').join('') : '<div class="empty"><strong>No archived boards</strong><span>Archived boards will appear here.</span></div>';
+  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Archived boards</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><p class="modal-hint">Restore a board to return it to your workspace, or delete it permanently.</p><div class="archived-board-list">' + rows + '</div></div></div></div>';
 }
 const fileToDataUrl = file => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
 async function handleAttachments(event) {
@@ -481,6 +492,40 @@ function handleAction(action, target) {
   if (action === 'close-modal') return dismissModal();
   if (action === 'settings') { modal = { type: 'settings' }; return renderModal(); }
   if (action === 'board-settings') { modal = { type: 'board-settings' }; return renderModal(); }
+  if (action === 'archived-boards') { modal = { type: 'archived-boards' }; return renderModal(); }
+  if (action === 'archive-board') {
+    board.archived = true;
+    const next = firstActiveBoard();
+    state.boardId = next ? next.id : null;
+    state.view = next ? 'board' : 'home';
+    modal = null;
+    persist(); renderApp(); notify('Board archived');
+    return;
+  }
+  if (action === 'unarchive-board') {
+    const restored = state.boards.find(item => item.id === target.dataset.id);
+    if (!restored) return;
+    restored.archived = false;
+    state.boardId = restored.id;
+    state.view = 'board';
+    modal = null;
+    persist(); renderApp(); notify('Board restored');
+    return;
+  }
+  if (action === 'delete-board') {
+    const candidate = target.dataset.id ? state.boards.find(item => item.id === target.dataset.id) : board;
+    if (!candidate) return;
+    return openConfirmModal({ heading: 'Delete this board permanently?', message: 'This removes the board, its lists, cards, attachments, and activity. This cannot be undone unless you have a backup.', confirmLabel: 'Delete board', onConfirm: () => {
+      state.boards = state.boards.filter(item => item.id !== candidate.id);
+      if (state.boardId === candidate.id) {
+        const next = firstActiveBoard();
+        state.boardId = next ? next.id : null;
+        state.view = next ? 'board' : 'home';
+      }
+      modal = null;
+      persist(); renderApp(); notify('Board deleted');
+    }});
+  }
   if (action === 'clear-board-background') { board.background = ''; persist(); applyBoardBackground(board); return renderBoardSettings(); }
   if (action === 'export-backup') return exportWorkspaceBackup();
   if (action === 'shortcuts') { modal = { type: 'shortcuts' }; return renderModal(); }
