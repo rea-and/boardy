@@ -157,6 +157,7 @@ function renderInputModal() {
     const submit = modal.onSubmit;
     modal = null;
     submit(value);
+    renderModal();
   });
   $('#input-modal-value').focus();
 }
@@ -422,7 +423,7 @@ function handleAction(action, target) {
 document.addEventListener('click', event => {
   const target = event.target.closest('[data-action]');
   if (!target) return;
-  if (target.dataset.action === 'close-modal' && target.closest('[data-stop]') && !target.classList.contains('close')) return;
+  if (target.dataset.action === 'close-modal' && event.target.closest('[data-stop]') && !event.target.classList.contains('close')) return;
   handleAction(target.dataset.action, target);
 });
 document.addEventListener('click', event => { if (event.target.matches('.modal-layer')) dismissModal(); });
