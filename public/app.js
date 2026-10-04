@@ -142,6 +142,11 @@ function renderCard(card, list) {
 function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button>'; wireDragAndDrop(); wireColumnDragAndDrop(); } }
 
 function openInputModal(config) { modal = { type: 'input', ...config }; renderModal(); }
+function openLabelModal() {
+  const cardModal = modal;
+  modal = { type: 'label', previousModal: cardModal, card: selectedCard().card };
+  renderModal();
+}
 function openCardCreateModal() { modal = { type: 'create-card' }; renderModal(); }
 function openShareModal() { modal = { type: 'share' }; renderModal(); }
 function openConfirmModal(config) { modal = { type: 'confirm', previousModal: modal, ...config }; renderModal(); }
@@ -160,6 +165,37 @@ function renderInputModal() {
     renderModal();
   });
   $('#input-modal-value').focus();
+}
+function renderLabelModal() {
+  const board = currentBoard();
+  const card = modal.card;
+  const usedOnCard = new Set((card.labels || []).map(label => label.name.toLowerCase()));
+  const labelsByName = new Map();
+  board.lists.flatMap(list => list.cards).flatMap(item => item.labels || []).forEach(label => {
+    const key = String(label.name || '').trim().toLowerCase();
+    if (key && !labelsByName.has(key)) labelsByName.set(key, { name: String(label.name).trim(), color: label.color || 'teal' });
+  });
+  const existingLabels = [...labelsByName.values()];
+  const colors = ['teal', 'violet', 'blue', 'amber', 'green'];
+  const applyLabel = (name, color = '') => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return;
+    if ((card.labels || []).some(label => label.name.toLowerCase() === trimmed.toLowerCase())) return notify('That label is already on this card');
+    card.labels = (card.labels || []).concat([{ name: trimmed, color: color || (existingLabels.find(label => label.name.toLowerCase() === trimmed.toLowerCase()) || {}).color || colors[card.labels.length % colors.length] }]);
+    modal = modal.previousModal;
+    persist(); renderModal(); renderBoardOnly(); notify('Label added');
+  };
+  const renderSuggestions = query => {
+    const normalized = query.trim().toLowerCase();
+    const matches = existingLabels.filter(label => !usedOnCard.has(label.name.toLowerCase()) && (!normalized || label.name.toLowerCase().includes(normalized))).slice(0, 6);
+    $('#label-suggestions').innerHTML = matches.length ? '<div class="label-suggestions-title">Existing labels</div>' + matches.map(label => '<button type="button" class="label-suggestion" data-label-name="' + esc(label.name) + '" data-label-color="' + esc(label.color) + '"><span class="label-dot ' + esc(label.color) + '"></span><span>' + esc(label.name) + '</span><span class="label-suggestion-hint">Use</span></button>').join('') : '<div class="label-suggestions-empty">' + (normalized ? 'No matching labels. Press Add label to create it.' : 'No other labels on this board yet.') + '</div>';
+    $('#label-suggestions').querySelectorAll('[data-label-name]').forEach(button => button.addEventListener('click', () => applyLabel(button.dataset.labelName, button.dataset.labelColor)));
+  };
+  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Add a label</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><form class="modal-form" id="label-modal-form"><div class="modal-body"><div class="field"><label for="label-modal-value">Label name</label><input class="inline-input" id="label-modal-value" placeholder="e.g. Priority" autocomplete="off" required /></div><div id="label-suggestions"></div></div><div class="modal-form-footer"><button type="button" class="ghost-btn close" data-action="close-modal">Cancel</button><button type="submit" class="primary-btn">Add label</button></div></form></div></div>';
+  $('#label-modal-value').addEventListener('input', event => renderSuggestions(event.target.value));
+  $('#label-modal-form').addEventListener('submit', event => { event.preventDefault(); applyLabel($('#label-modal-value').value); });
+  $('#label-modal-value').focus();
+  renderSuggestions('');
 }
 function renderCardCreateModal() {
   const board = currentBoard();
@@ -288,6 +324,7 @@ function renderModal() {
   if (!modal) { if (root) root.innerHTML = ''; return; }
   if (modal.type === 'settings') return renderSettings();
   if (modal.type === 'input') return renderInputModal();
+  if (modal.type === 'label') return renderLabelModal();
   if (modal.type === 'create-card') return renderCardCreateModal();
   if (modal.type === 'confirm') return renderConfirmModal();
   if (modal.type === 'share') return renderShareModal();
@@ -438,7 +475,7 @@ function handleAction(action, target) {
     const cardModal = modal;
     return openConfirmModal({ heading: 'Delete this checklist item?', message: 'This removes the item and its completion state from the card.', confirmLabel: 'Delete item', onConfirm: () => { card.checklist.splice(index, 1); modal = cardModal; persist(); renderModal(); notify('Checklist item deleted'); } });
   }
-  if (action === 'add-label') return openInputModal({ heading: 'Add a label', label: 'Label name', placeholder: 'e.g. Priority', submitLabel: 'Add label', onSubmit: name => { const colors = ['teal', 'violet', 'blue', 'amber', 'green']; card.labels = (card.labels || []).concat([{ name, color: colors[card.labels.length % colors.length] }]); persist(); renderModal(); renderBoardOnly(); }});
+  if (action === 'add-label') return openLabelModal();
   if (action === 'remove-label') { card.labels.splice(Number(target.dataset.index), 1); persist(); renderModal(); renderBoardOnly(); }
   if (action === 'set-due') return openInputModal({ heading: 'Set a due date', label: 'Due date', value: card.due ? card.due.slice(0, 10) : '', inputType: 'date', submitLabel: 'Save date', onSubmit: date => { card.due = new Date(date + 'T17:00:00').toISOString(); persist(); renderModal(); renderBoardOnly(); }});
   if (action === 'clear-due') { card.due = ''; persist(); renderModal(); renderBoardOnly(); notify('Due date removed'); }
