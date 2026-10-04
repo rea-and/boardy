@@ -140,6 +140,46 @@ server {
 }
 ~~~
 
+### Apache under `/boardy/`
+
+If Boardy should share `carlevato.net` with other applications, run it locally on port 4173 and proxy only the `/boardy/` path. Boardy is subpath-aware, so its assets and API requests stay under this prefix.
+
+Enable the required Apache modules once:
+
+~~~bash
+sudo a2enmod proxy proxy_http headers rewrite ssl
+~~~
+
+Add this block inside the existing HTTPS `<VirtualHost *:443>` in `/etc/apache2/sites-available/us-calendar-ssl.conf`. Put it before any broader Boardy or root proxy rules:
+
+~~~apache
+# ------------------------------------------------------------
+# Boardy at /boardy
+# ------------------------------------------------------------
+RedirectMatch permanent ^/boardy$ /boardy/
+
+ProxyPreserveHost On
+ProxyPass        /boardy/api/ http://127.0.0.1:4173/api/
+ProxyPassReverse /boardy/api/ http://127.0.0.1:4173/api/
+ProxyPass        /boardy/     http://127.0.0.1:4173/
+ProxyPassReverse /boardy/     http://127.0.0.1:4173/
+
+<Location "/boardy/">
+    Require all granted
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Prefix "/boardy"
+</Location>
+~~~
+
+Check and reload Apache:
+
+~~~bash
+sudo apachectl configtest
+sudo systemctl reload apache2
+~~~
+
+Because your port 80 virtual host redirects to HTTPS, use `https://carlevato.net/boardy/` as the final URL; `http://carlevato.net/boardy` will redirect there.
+
 Use your certificate manager or hosting provider to provision and renew TLS certificates. Restrict the raw port 4173 with the server firewall once the proxy is working.
 
 ## Persistence and backups

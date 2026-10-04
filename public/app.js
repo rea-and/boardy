@@ -1,4 +1,5 @@
 const $ = (selector, root = document) => root.querySelector(selector);
+const appRoot = window.location.pathname === '/' ? '' : '/' + window.location.pathname.split('/').filter(Boolean)[0];
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
 const uid = prefix => prefix + '_' + Math.random().toString(36).slice(2, 9);
 const initials = name => String(name || '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'YO';
@@ -34,7 +35,7 @@ let dragState = null;
 let columnDragState = null;
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
+  const response = await fetch(appRoot + path, { headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || 'Something went wrong');
   return body;
