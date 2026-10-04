@@ -19,6 +19,21 @@ echo "Restarting Boardy..."
 sudo systemctl restart boardy
 sudo systemctl is-active --quiet boardy
 
-echo "Checking Boardy health..."
+echo "Waiting for Boardy health..."
+healthy=0
+for attempt in $(seq 1 30); do
+  if curl --fail --silent http://127.0.0.1:4173/api/health >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$healthy" -ne 1 ]; then
+  echo "Boardy did not become healthy within 30 seconds." >&2
+  sudo systemctl status boardy --no-pager >&2 || true
+  exit 1
+fi
+
 curl --fail --silent --show-error http://127.0.0.1:4173/api/health
 printf '\nDeployment complete.\n'
