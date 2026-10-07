@@ -1,5 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
-const appRoot = window.location.pathname === '/' ? '' : '/' + window.location.pathname.split('/').filter(Boolean)[0];
+const appScriptPath = new URL('app.js', document.baseURI).pathname;
+const appRoot = appScriptPath.replace(/\/app\.js$/, '');
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
 const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/g;
 const normalizeUrl = raw => {
@@ -59,6 +60,44 @@ let cardSaveStatus = 'Saved';
 let saveTimer;
 let dragState = null;
 let columnDragState = null;
+
+function slugifyBoardTitle(value) {
+  return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'board';
+}
+function ensureBoardSlugs(boards) {
+  const used = new Set();
+  let changed = false;
+  boards.forEach(board => {
+    const base = slugifyBoardTitle(board.slug || board.title);
+    let slug = base;
+    let suffix = 2;
+    while (used.has(slug)) slug = base + '-' + suffix++;
+    if (board.slug !== slug) { board.slug = slug; changed = true; }
+    used.add(slug);
+  });
+  return changed;
+}
+function routeBoardSlug() {
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const rootSegment = appRoot.slice(1);
+  const rootIndex = rootSegment ? segments.indexOf(rootSegment) : -1;
+  const raw = segments[rootIndex + 1] || (appRoot ? '' : segments[0] || '');
+  try { return decodeURIComponent(raw).toLowerCase(); } catch { return raw.toLowerCase(); }
+}
+function boardSlug(board) { return board.slug || slugifyBoardTitle(board.title); }
+function boardUrl(board) { return (appRoot || '') + '/' + encodeURIComponent(boardSlug(board)); }
+function workspaceUrl() { return appRoot || '/'; }
+function updateBoardUrl(board, replace = false) {
+  const next = board ? boardUrl(board) : workspaceUrl();
+  if (window.location.pathname !== next) window.history[replace ? 'replaceState' : 'pushState']({}, '', next);
+}
+function rememberBoard(board) {
+  if (!board || !state.user) return;
+  try { window.localStorage.setItem('boardy:last-board:' + state.user.id, board.id); } catch {}
+}
+function rememberedBoardId(userId) {
+  try { return window.localStorage.getItem('boardy:last-board:' + userId); } catch { return null; }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(appRoot + path, { headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
@@ -140,9 +179,17 @@ function persist() {
   }, 350);
 }
 function applySession(result) {
-  state = { ...state, ...result.data, user: result.user, boardId: (result.data.boards.find(board => !board.archived) || result.data.boards[0])?.id || null };
+  const boards = result.data.boards || [];
+  const slugsChanged = ensureBoardSlugs(boards);
+  const routeBoard = boards.find(board => !board.archived && boardSlug(board) === routeBoardSlug());
+  const remembered = rememberedBoardId(result.user.id);
+  const selected = routeBoard || boards.find(board => !board.archived && board.id === remembered) || boards.find(board => !board.archived) || boards[0];
+  state = { ...state, ...result.data, boards, user: result.user, boardId: selected?.id || null };
+  if (selected && !selected.archived) rememberBoard(selected);
+  if (routeBoardSlug() && !routeBoard && selected && !selected.archived) updateBoardUrl(selected, true);
   setPreferences();
   renderApp();
+  if (slugsChanged) persist();
 }
 
 function renderAuth(mode = 'login', error = '') {
@@ -315,6 +362,7 @@ function renderConfirmModal() {
 function renderShareModal() {
   const board = currentBoard();
   $('#modal-root').innerHTML = '<div class=\"modal-layer\" data-action=\"close-modal\"><div class=\"modal modal--small\" data-stop><div class=\"modal-head\"><h2>Share ' + esc(board.title) + '</h2><button class=\"icon-btn close\" data-action=\"close-modal\" aria-label=\"Close\">×</button></div><div class=\"modal-body\"><div class=\"share-status\"><span>Private board</span><p>Boardy keeps this workspace behind account sign-in. Copy the link for a teammate who already has access to this server.</p></div><div class=\"field\"><label for=\"share-link\">Board link</label><div class=\"share-link-row\"><input class=\"inline-input\" id=\"share-link\" value=\"' + esc(window.location.href) + '\" readonly /><button class=\"secondary-btn\" data-action=\"copy-board-link\">Copy</button></div></div></div><div class=\"modal-form-footer\"><button class=\"primary-btn close\" data-action=\"close-modal\">Done</button></div></div></div>';
+  $('#share-link').value = window.location.origin + boardUrl(board);
 }
 function renderShortcutsModal() {
   const rows = [['?', 'Show keyboard shortcuts'], ['⌘ / Ctrl K', 'Focus card search'], ['/', 'Focus card search'], ['N', 'Create a card'], ['L', 'Create a list'], ['S', 'Open workspace settings'], ['Esc', 'Close the current dialog'], ['⌘ / Ctrl Enter', 'Post a card comment']];
@@ -527,7 +575,7 @@ async function handleBackupImport(event) {
   if (file.size > maxBackupBytes) return notify('Backup files must be smaller than 7 MB');
   try {
     const workspace = parseWorkspaceBackup(JSON.parse(await file.text()));
-    openConfirmModal({ heading: 'Import this backup?', message: 'This replaces every board and workspace preference in your current account. This cannot be undone unless you export a backup first.', confirmLabel: 'Import backup', onConfirm: () => { state = { ...state, ...workspace, boardId: workspace.boards[0] ? workspace.boards[0].id : null, query: '', onlyDue: false, onlyStarred: false }; persist(); renderApp(); notify('Backup imported'); } });
+    openConfirmModal({ heading: 'Import this backup?', message: 'This replaces every board and workspace preference in your current account. This cannot be undone unless you export a backup first.', confirmLabel: 'Import backup', onConfirm: () => { ensureBoardSlugs(workspace.boards); const importedBoard = workspace.boards.find(item => !item.archived) || workspace.boards[0]; state = { ...state, ...workspace, boardId: importedBoard ? importedBoard.id : null, query: '', onlyDue: false, onlyStarred: false }; if (importedBoard && !importedBoard.archived) { rememberBoard(importedBoard); updateBoardUrl(importedBoard, true); } else updateBoardUrl(null, true); persist(); renderApp(); notify('Backup imported'); } });
   } catch (error) { notify(error.message || 'Could not import this backup'); }
 }
 
@@ -548,6 +596,7 @@ function handleAction(action, target) {
     const next = firstActiveBoard();
     state.boardId = next ? next.id : null;
     state.view = next ? 'board' : 'home';
+    if (next) { rememberBoard(next); updateBoardUrl(next, true); } else updateBoardUrl(null, true);
     modal = null;
     persist(); renderApp(); notify('Board archived');
     return;
@@ -558,6 +607,7 @@ function handleAction(action, target) {
     restored.archived = false;
     state.boardId = restored.id;
     state.view = 'board';
+    rememberBoard(restored); updateBoardUrl(restored, true);
     modal = null;
     persist(); renderApp(); notify('Board restored');
     return;
@@ -571,6 +621,7 @@ function handleAction(action, target) {
         const next = firstActiveBoard();
         state.boardId = next ? next.id : null;
         state.view = next ? 'board' : 'home';
+        if (next) { rememberBoard(next); updateBoardUrl(next, true); } else updateBoardUrl(null, true);
       }
       modal = null;
       persist(); renderApp(); notify('Board deleted');
@@ -582,7 +633,7 @@ function handleAction(action, target) {
   if (action === 'toggle-sidebar') return $('#sidebar').classList.toggle('open');
   if (action === 'toggle-sidebar-collapse') { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); return renderApp(); }
   if (action === 'clear-search') { state.query = ''; renderApp(); $('#search').focus(); return; }
-  if (action === 'select-board') { state.boardId = target.dataset.id; state.view = 'board'; state.query = ''; $('#sidebar')?.classList.remove('open'); return renderApp(); }
+  if (action === 'select-board') { const selectedBoard = state.boards.find(item => item.id === target.dataset.id && !item.archived); if (!selectedBoard) return; state.boardId = selectedBoard.id; state.view = 'board'; state.query = ''; rememberBoard(selectedBoard); updateBoardUrl(selectedBoard); $('#sidebar')?.classList.remove('open'); return renderApp(); }
   if (action === 'change-board-color') return openBoardColorModal(state.boards.find(item => item.id === target.dataset.id) || board);
   if (action === 'home') { state.view = 'home'; state.onlyStarred = false; state.onlyDue = false; return renderApp(); }
   if (action === 'starred') { state.view = 'starred'; state.onlyStarred = true; state.onlyDue = false; return renderApp(); }
@@ -590,7 +641,7 @@ function handleAction(action, target) {
   if (action === 'starred-filter') { state.view = 'board'; state.onlyStarred = !state.onlyStarred; return renderApp(); }
   if (action === 'add-board') return openInputModal({ heading: 'Create a board', label: 'Board name', placeholder: 'e.g. Product launch', submitLabel: 'Create board', onSubmit: title => {
     const newBoard = { id: uid('board'), title, description: '', color: '#8f7aea', background: 'aurora', starred: false, members: [], lists: [{ id: uid('list'), title: 'To do', cards: [] }, { id: uid('list'), title: 'In progress', cards: [] }, { id: uid('list'), title: 'Done', cards: [] }] };
-    state.boards.push(newBoard); state.boardId = newBoard.id; state.view = 'board'; persist(); renderApp();
+    state.boards.push(newBoard); ensureBoardSlugs(state.boards); state.boardId = newBoard.id; state.view = 'board'; rememberBoard(newBoard); updateBoardUrl(newBoard); persist(); renderApp();
   }});
   if (action === 'rename-board') return openInputModal({ heading: 'Rename board', label: 'Board name', value: board.title, submitLabel: 'Save changes', onSubmit: title => { board.title = title; persist(); renderApp(); }});
   if (action === 'edit-board-description') return openInputModal({ heading: 'Describe this board', label: 'Board description', value: board.description || '', placeholder: 'What is this board for?', submitLabel: 'Save description', onSubmit: description => { board.description = description; persist(); renderApp(); }});
@@ -686,5 +737,20 @@ document.addEventListener('keydown', event => {
   if (key === 'n') { event.preventDefault(); return openCardCreateModal(); }
   if (key === 'l') return openInputModal({ heading: 'Add a list', label: 'List name', placeholder: 'e.g. Ready for review', submitLabel: 'Add list', onSubmit: title => { currentBoard().lists.push({ id: uid('list'), title, cards: [] }); persist(); renderBoardOnly(); } });
   if (key === 's') { event.preventDefault(); modal = { type: 'settings' }; return renderModal(); }
+});
+window.addEventListener('popstate', () => {
+  if (!state.user) return;
+  const routedBoard = state.boards.find(board => !board.archived && boardSlug(board) === routeBoardSlug());
+  const fallback = state.boards.find(board => !board.archived && board.id === rememberedBoardId(state.user.id)) || firstActiveBoard();
+  const selected = routedBoard || fallback;
+  if (selected) {
+    state.boardId = selected.id;
+    state.view = 'board';
+    rememberBoard(selected);
+  } else {
+    state.boardId = null;
+    state.view = 'home';
+  }
+  renderApp();
 });
 (async function boot() { try { const result = await api('/api/session'); if (result.user) applySession(result); else renderAuth(); } catch (error) { renderAuth('login', error.message); } })();
