@@ -60,6 +60,8 @@ let cardSaveStatus = 'Saved';
 let saveTimer;
 let dragState = null;
 let columnDragState = null;
+let pendingInvitation = null;
+let pendingInvitationToken = '';
 
 function slugifyBoardTitle(value) {
   return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'board';
@@ -91,6 +93,14 @@ function publicShareToken() {
   const marker = segments[rootIndex + 1] || '';
   if (!marker.startsWith('public-')) return '';
   try { return decodeURIComponent(marker.slice('public-'.length)); } catch { return marker.slice('public-'.length); }
+}
+function invitationToken() {
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const rootSegment = appRoot.slice(1);
+  const rootIndex = rootSegment ? segments.indexOf(rootSegment) : -1;
+  const marker = segments[rootIndex + 1] || '';
+  if (!marker.startsWith('invite-')) return '';
+  try { return decodeURIComponent(marker.slice('invite-'.length)); } catch { return marker.slice('invite-'.length); }
 }
 function boardSlug(board) { return board.slug || slugifyBoardTitle(board.title); }
 function boardUrl(board) { return (appRoot || '') + '/' + encodeURIComponent(boardSlug(board)); }
@@ -132,9 +142,13 @@ function setCardSaveStatus(status) {
 }
 function firstActiveBoard() { return state.boards.find(board => !board.archived); }
 function currentBoard() { return state.boards.find(board => board.id === state.boardId && !board.archived) || firstActiveBoard(); }
+function boardRole(board = currentBoard()) { return board?.accessRole || 'owner'; }
+function canEditBoard(board = currentBoard()) { return boardRole(board) !== 'viewer'; }
+function canManageBoard(board = currentBoard()) { return boardRole(board) === 'owner'; }
 function allCards(board = currentBoard()) { return (board && board.lists || []).flatMap(list => list.cards.map(card => ({ card, list }))); }
 function moveCard(cardId, fromListId, toListId, targetCardId = null, placeAfter = false) {
   const board = currentBoard();
+  if (!canEditBoard(board)) return false;
   const from = board.lists.find(list => list.id === fromListId);
   const to = board.lists.find(list => list.id === toListId);
   const index = from && from.cards.findIndex(card => card.id === cardId);
@@ -157,6 +171,7 @@ function cardDropPosition(column, clientY) {
 }
 function moveList(listId, targetListId, placeAfter = false) {
   const board = currentBoard();
+  if (!canEditBoard(board)) return false;
   const sourceIndex = board.lists.findIndex(list => list.id === listId);
   if (sourceIndex < 0 || listId === targetListId) return false;
   const list = board.lists.splice(sourceIndex, 1)[0];
@@ -195,28 +210,43 @@ function applySession(result) {
   const selected = routeBoard || boards.find(board => !board.archived && board.id === remembered) || boards.find(board => !board.archived) || boards[0];
   state = { ...state, ...result.data, boards, user: result.user, boardId: selected?.id || null };
   if (selected && !selected.archived) rememberBoard(selected);
-  if (selected && !selected.archived && routeBoardSlug() !== boardSlug(selected)) updateBoardUrl(selected, true);
+  if (selected && !selected.archived && !pendingInvitationToken && routeBoardSlug() !== boardSlug(selected)) updateBoardUrl(selected, true);
   setPreferences();
   renderApp();
   if (slugsChanged) persist();
 }
 
-function renderAuth(mode = 'login', error = '') {
+async function finishAuthentication(result) {
+  applySession(result);
+  if (!pendingInvitationToken) return;
+  try {
+    const accepted = await api('/api/invitations/' + encodeURIComponent(pendingInvitationToken), { method: 'POST', body: '{}' });
+    const refreshed = await api('/api/session');
+    pendingInvitation = null;
+    pendingInvitationToken = '';
+    applySession(refreshed);
+    const invitedBoard = state.boards.find(board => board.id === accepted.boardId);
+    if (invitedBoard) { state.boardId = invitedBoard.id; state.view = 'board'; rememberBoard(invitedBoard); updateBoardUrl(invitedBoard, true); renderApp(); }
+    notify('You joined ' + (invitedBoard ? invitedBoard.title : 'the board'));
+  } catch (error) { notify(error.message); }
+}
+function renderAuth(mode = 'login', error = '', invitation = pendingInvitation) {
   const register = mode === 'register';
   const nameField = register ? '<div class=\"field\"><label for=\"name\">Your name</label><input id=\"name\" name=\"name\" autocomplete=\"name\" placeholder=\"Alex Morgan\" required /></div>' : '';
   const passwordAutocomplete = register ? 'new-password' : 'current-password';
   $('#app').innerHTML = '<div class=\"auth-shell\"><section class=\"auth-panel\"><div class=\"auth-card\"><div class=\"auth-brand\"><span class=\"brand-mark\"><span></span><span></span></span>Boardy</div><h2>' + (register ? 'Create your workspace' : 'Welcome back') + '</h2><p>' + (register ? 'Your next clear step starts here.' : 'Pick up where your team left off.') + '</p>' + (error ? '<div class=\"form-error\">' + esc(error) + '</div>' : '') + '<form id=\"auth-form\">' + nameField + '<div class=\"field\"><label for=\"email\">Email address</label><input id=\"email\" name=\"email\" type=\"email\" autocomplete=\"email\" placeholder=\"you@company.com\" required /></div><div class=\"field\"><label for=\"password\">Password</label><input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"' + passwordAutocomplete + '\" placeholder=\"At least 8 characters\" required /></div><button class=\"primary-btn auth-submit\" type=\"submit\">' + (register ? 'Create account' : 'Sign in') + '</button></form><div class=\"auth-switch\">' + (register ? 'Already have an account?' : 'New to Boardy?') + ' <button id=\"auth-toggle\">' + (register ? 'Sign in' : 'Create an account') + '</button></div><button class=\"demo-btn\" id=\"demo-login\">Open the demo workspace</button></div></section><section class=\"auth-panel auth-panel--visual\"><div class=\"auth-grid\"><div class=\"auth-copy\"><h1>Make space for good work.</h1><p>A thoughtful kanban workspace for ideas, decisions, and everything that moves between them.</p></div><div class=\"mini-board\"><div class=\"mini-board-head\"><strong>Product launch</strong><div class=\"mini-dots\"><span></span><span></span><span></span></div></div><div class=\"mini-columns\"><div class=\"mini-column\"><strong>Inbox</strong><div class=\"mini-card\"><i></i>Research the sharpest angle</div><div class=\"mini-card\">Write a one-line brief</div></div><div class=\"mini-column\"><strong>In motion</strong><div class=\"mini-card\"><i></i>Prototype the new flow</div><div class=\"mini-card\">Share with the team</div></div><div class=\"mini-column\"><strong>Done</strong><div class=\"mini-card\">Name the thing</div></div></div></div></div></section></div>';
   if (!register) { $('.auth-card h2').textContent = 'Welcome to Boardy'; $('.auth-card>p').textContent = 'Sign in to your workspace or create an account to get started.'; }
+  if (invitation) { $('.auth-card>p').textContent = invitation.ownerName + ' invited you to join “' + invitation.boardTitle + '”.'; $('.auth-card>p').insertAdjacentHTML('afterend', '<div class="invite-auth-note"><strong>Board invitation</strong><span>Use ' + esc(invitation.email) + ' to accept this invitation.</span></div>'); $('#email').value = invitation.email; $('#email').readOnly = true; $('#demo-login')?.remove(); }
   $('#auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
-    try { applySession(await api(register ? '/api/register' : '/api/login', { method: 'POST', body: JSON.stringify(values) })); }
-    catch (err) { renderAuth(mode, err.message); }
+    try { await finishAuthentication(await api(register ? '/api/register' : '/api/login', { method: 'POST', body: JSON.stringify(values) })); }
+    catch (err) { renderAuth(mode, err.message, invitation); }
   });
-  $('#auth-toggle').addEventListener('click', () => renderAuth(register ? 'login' : 'register'));
-  $('#demo-login').addEventListener('click', async () => {
-    try { applySession(await api('/api/demo', { method: 'POST', body: '{}' })); }
-    catch (err) { renderAuth(mode, err.message); }
+  $('#auth-toggle').addEventListener('click', () => renderAuth(register ? 'login' : 'register', '', invitation));
+  $('#demo-login')?.addEventListener('click', async () => {
+    try { await finishAuthentication(await api('/api/demo', { method: 'POST', body: '{}' })); }
+    catch (err) { renderAuth(mode, err.message, invitation); }
   });
 }
 
@@ -250,6 +280,34 @@ function renderPublicBoard(board) {
   document.title = board.title + ' · Boardy';
 }
 
+function syncBoardAccessUI(board) {
+  const owner = canManageBoard(board);
+  const editable = canEditBoard(board);
+  document.querySelectorAll('#board-nav .board-nav[data-id]').forEach(item => {
+    const itemBoard = state.boards.find(candidate => candidate.id === item.dataset.id);
+    if (!itemBoard || itemBoard.accessRole === 'owner') return;
+    const color = item.querySelector('.board-color-button');
+    color?.removeAttribute('data-action');
+    color?.removeAttribute('role');
+    color?.removeAttribute('tabindex');
+    if (!item.querySelector('.shared-board-mark')) item.insertAdjacentHTML('beforeend', '<span class="shared-board-mark" title="Shared with you" aria-label="Shared with you">↗</span>');
+  });
+  const memberNames = (board.members || []).map(member => member.name).filter(Boolean).slice(0, 5);
+  const access = '<div class="board-access-summary"><div class="board-member-avatars">' + (board.members || []).slice(0, 5).map(member => '<span class="avatar" title="' + esc(member.name || 'Board member') + '">' + esc(member.initials || initials(member.name)) + '</span>').join('') + '</div><span>' + (memberNames.length ? memberNames.join(', ') : 'No other members yet') + '</span></div>';
+  if (!owner || (board.members || []).length > 1) $('.board-subtitle')?.insertAdjacentHTML('afterend', access);
+  if (owner) return;
+  const colorButton = document.querySelector('.board-title-line [data-action="change-board-color"]');
+  if (colorButton) { const colorSwatch = document.createElement('span'); colorSwatch.className = 'board-color board-color-header'; colorSwatch.style.background = safePublicColor(board.color); colorButton.replaceWith(colorSwatch); }
+  document.querySelector('.top-actions [data-action="invite"]')?.remove();
+  document.querySelector('.board-title-line [data-action="toggle-star"]')?.remove();
+  document.querySelector('.board-title-line [data-action="rename-board"]')?.remove();
+  document.querySelector('.board-subtitle')?.removeAttribute('data-action');
+  document.querySelector('.board-actions [data-action="share"]')?.remove();
+  if (!editable) document.querySelector('.board-actions [data-action="add-card-top"]')?.remove();
+  const settings = $('.board-toolbar [data-action="board-settings"]');
+  if (settings) settings.replaceWith(Object.assign(document.createElement('span'), { className: 'toolbar-btn board-access-note', textContent: boardRole(board) === 'viewer' ? '◉ Read-only access' : '✎ Shared · Can edit' }));
+}
+
 function renderApp() {
   setPreferences();
   const board = currentBoard();
@@ -266,6 +324,7 @@ function renderApp() {
   if (archivedCount) $('#board-nav')?.insertAdjacentHTML('afterend', '<button class="nav-item archived-nav" data-action="archived-boards" title="Archived boards"><span>▣</span> Archived boards <small class="archived-count">' + archivedCount + '</small></button>');
   applyBoardBackground(board);
   $('.board-toolbar [data-action="settings"]')?.setAttribute('data-action', 'board-settings');
+  syncBoardAccessUI(board);
   $('#search').addEventListener('input', event => { state.query = event.target.value; $('#search-clear').classList.toggle('hidden', !state.query); renderBoardOnly(); });
   wireDragAndDrop();
   wireColumnDragAndDrop();
@@ -274,21 +333,26 @@ function renderApp() {
 function renderEmptyWorkspace() { const hasArchived = state.boards.some(board => board.archived); $('#app').innerHTML = '<div class=\"empty\" style=\"min-height:100vh;display:grid;place-items:center\"><div><strong>' + (hasArchived ? 'Your active boards are clear.' : 'Your workspace is ready.') + '</strong><span>' + (hasArchived ? 'Restore an archived board or create a new one.' : 'Create your first board to get started.') + '</span><div class=\"empty-actions\"><button class=\"primary-btn\" data-action=\"add-board\">Create a board</button>' + (hasArchived ? '<button class=\"secondary-btn\" data-action=\"archived-boards\">View archived boards</button>' : '') + '</div></div></div><div id=\"modal-root\"></div><div class=\"toast\"></div>'; }
 function renderColumns(board) {
   const search = state.query.toLowerCase().trim();
+  const editable = canEditBoard(board);
   return (board.lists || []).map(list => {
     const cards = list.cards.filter(card => (!search || searchableCard(card).includes(search)) && (!state.onlyDue || isDueSoon(card.due)) && (!state.onlyStarred || card.starred));
-    return '<section class=\"column\" data-list=\"' + list.id + '\"><div class=\"column-header\"><h3><button class=\"column-title\" data-action=\"rename-list\" data-id=\"' + list.id + '\" title=\"Rename list\" aria-label=\"Rename ' + esc(list.title) + '\">' + esc(list.title) + '</button></h3><span class=\"count\">' + cards.length + '</span><button class=\"column-drag\" draggable=\"true\" data-list=\"' + list.id + '\" title=\"Drag to reorder list. When focused, use Left or Right Arrow to move it.\" aria-label=\"Reorder ' + esc(list.title) + '\" aria-keyshortcuts=\"ArrowLeft ArrowRight\">⠿</button><button class=\"icon-btn column-menu\" data-action=\"rename-list\" data-id=\"' + list.id + '\" title=\"Rename list\">···</button></div>' + (cards.length ? cards.map(card => renderCard(card, list)).join('') : '<div class=\"empty\"><strong>' + (search || state.onlyDue ? 'No matching cards' : 'Nothing here yet') + '</strong><span>' + (search || state.onlyDue ? 'Try another filter.' : 'Add a card to get moving.') + '</span></div>') + '<button class=\"add-card\" data-action=\"add-card\" data-id=\"' + list.id + '\">＋ Add a card</button></section>';
+    const title = editable ? '<button class="column-title" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename ' + esc(list.title) + '">' + esc(list.title) + '</button>' : '<span class="column-title-text">' + esc(list.title) + '</span>';
+    const controls = editable ? '<button class="column-drag" draggable="true" data-list="' + list.id + '" title="Drag to reorder list. When focused, use Left or Right Arrow to move it." aria-label="Reorder ' + esc(list.title) + '" aria-keyshortcuts="ArrowLeft ArrowRight">⠿</button><button class="icon-btn column-menu" data-action="rename-list" data-id="' + list.id + '" title="Rename list">···</button>' : '';
+    return '<section class="column" data-list="' + list.id + '"><div class="column-header"><h3>' + title + '</h3><span class="count">' + cards.length + '</span>' + controls + '</div>' + (cards.length ? cards.map(card => renderCard(card, list)).join('') : '<div class="empty"><strong>' + (search || state.onlyDue ? 'No matching cards' : 'Nothing here yet') + '</strong><span>' + (search || state.onlyDue ? 'Try another filter.' : 'Add a card to get moving.') + '</span></div>') + (editable ? '<button class="add-card" data-action="add-card" data-id="' + list.id + '">＋ Add a card</button>' : '') + '</section>';
   }).join('');
 }
 function renderCard(card, list) {
+  const editable = canEditBoard();
   const done = (card.checklist || []).filter(item => item.done).length;
   const total = (card.checklist || []).length;
-  const people = card.members && card.members.length ? '<span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span>' : '';
-  const labels = card.labels && card.labels.length ? '<div class=\"labels\">' + card.labels.map(label => '<span class=\"label ' + esc(label.color || '') + '\">' + esc(label.name) + '</span>').join('') + '</div>' : '';
-  const footer = (card.due ? '<span class=\"card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '\">◷ ' + formatDate(card.due) + '</span>' : '') + (total ? '<span class=\"card-stat progress\"><span class=\"progress-bar\"><i style=\"width:' + Math.round(done / total * 100) + '%\"></i></span>' + done + '/' + total + '</span>' : '') + (card.attachments && card.attachments.length ? '<span class=\"card-stat\">⌕ ' + card.attachments.length + '</span>' : '') + '<div class=\"avatars\">' + people + '</div>';
-  return '<article class=\"card\" draggable=\"true\" data-action=\"open-card\" data-id=\"' + card.id + '\" data-list=\"' + list.id + '\">' + labels + '<div class=\"card-topline\"><div class=\"card-title\">' + esc(card.title) + '</div><button class=\"card-star ' + (card.starred ? 'active' : '') + '\" data-action=\"toggle-card-star\" data-id=\"' + card.id + '\" data-list=\"' + list.id + '\" title=\"Star card\">★</button></div>' + (card.description ? '<div class=\"card-description\">' + linkify(card.description) + '</div>' : '') + '<div class=\"card-footer\">' + footer + '</div></article>';
+  const people = card.members && card.members.length ? '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span>' : '';
+  const labels = card.labels && card.labels.length ? '<div class="labels">' + card.labels.map(label => '<span class="label ' + esc(label.color || '') + '">' + esc(label.name) + '</span>').join('') + '</div>' : '';
+  const footer = (card.due ? '<span class="card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '">◷ ' + formatDate(card.due) + '</span>' : '') + (total ? '<span class="card-stat progress"><span class="progress-bar"><i style="width:' + Math.round(done / total * 100) + '%"></i></span>' + done + '/' + total + '</span>' : '') + (card.attachments && card.attachments.length ? '<span class="card-stat">⌕ ' + card.attachments.length + '</span>' : '') + '<div class="avatars">' + people + '</div>';
+  const cardStar = editable ? '<button class="card-star ' + (card.starred ? 'active' : '') + '" data-action="toggle-card-star" data-id="' + card.id + '" data-list="' + list.id + '" title="Star card">★</button>' : '';
+  return '<article class="card ' + (editable ? '' : 'card-read-only') + '" ' + (editable ? 'draggable="true"' : '') + ' data-action="open-card" data-id="' + card.id + '" data-list="' + list.id + '">' + labels + '<div class="card-topline"><div class="card-title">' + esc(card.title) + '</div>' + cardStar + '</div>' + (card.description ? '<div class="card-description">' + linkify(card.description) + '</div>' : '') + '<div class="card-footer">' + footer + '</div></article>';
 }
 function markTruncatedDescriptions(root = document) { root.querySelectorAll('.card-description').forEach(description => description.classList.toggle('is-truncated', description.scrollHeight > description.clientHeight + 1)); }
-function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button>'; $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); markTruncatedDescriptions(); } }
+function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + (canEditBoard(board) ? '<button class="add-list" data-action="add-list">＋ Add another list</button>' : ''); $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); markTruncatedDescriptions(); } }
 
 function openInputModal(config) { modal = { type: 'input', ...config }; renderModal(); }
 function openLabelModal() {
@@ -392,10 +456,42 @@ function renderConfirmModal() {
 }
 function renderShareModal() {
   const board = currentBoard();
+  if (!canManageBoard(board)) {
+    const role = boardRole(board) === 'viewer' ? 'Read-only' : 'Can edit';
+    $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Shared board</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><div class="share-status is-public"><span>' + esc(role) + '</span><p>You were invited to this board. Only the owner can manage access.</p></div><div class="shared-members-list"><div class="modal-label" style="margin-top:0">People on this board</div>' + (board.members || []).map(member => '<div class="shared-member-row"><span class="avatar">' + esc(member.initials || initials(member.name)) + '</span><span>' + esc(member.name) + '</span>' + (member.role ? '<small>' + esc(member.role === 'editor' ? 'Can edit' : member.role === 'owner' ? 'Owner' : 'Read-only') + '</small>' : '') + '</div>').join('') + '</div></div><div class="modal-form-footer"><button class="primary-btn close" data-action="close-modal">Done</button></div></div></div>';
+    return;
+  }
   const isPublic = Boolean(board.publicShare?.enabled && board.publicShare?.token);
   const publicLink = isPublic ? window.location.origin + publicBoardUrl(board) : '';
-  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Share ' + esc(board.title) + '</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><div class="share-status ' + (isPublic ? 'is-public' : '') + '"><span>' + (isPublic ? 'Public link enabled' : 'Private board') + '</span><p>' + (isPublic ? 'Anyone with the public link can view this board without an account. They cannot edit it or see your other boards.' : 'Keep this board private, or enable a read-only link for anyone who needs to view it.') + '</p></div><label class="public-share-toggle"><input id="public-share-toggle" type="checkbox" ' + (isPublic ? 'checked' : '') + ' /><span><strong>Allow public viewing</strong><small>Anyone with the link can view this board without signing in.</small></span></label>' + (isPublic ? '<div class="field"><label for="public-share-link">Public board link</label><div class="share-link-row"><input class="inline-input" id="public-share-link" value="' + esc(publicLink) + '" readonly /><button class="secondary-btn" data-action="copy-public-board-link">Copy</button></div><button class="ghost-btn revoke-public-share" data-action="revoke-public-share">Disable public link</button></div>' : '') + '<div class="field private-board-link"><label for="share-link">Private board link</label><div class="share-link-row"><input class="inline-input" id="share-link" value="' + esc(window.location.origin + boardUrl(board)) + '" readonly /><button class="secondary-btn" data-action="copy-board-link">Copy</button></div></div></div><div class="modal-form-footer"><button class="primary-btn close" data-action="close-modal">Done</button></div></div></div>';
+  const invitations = (modal.invitations || []).filter(invitation => invitation.status !== 'revoked');
+  const members = (board.members || []).map(member => '<div class="shared-member-row"><span class="avatar">' + esc(member.initials || initials(member.name)) + '</span><span>' + esc(member.name) + '</span><small>' + esc(member.role === 'owner' ? 'Owner' : member.role === 'editor' ? 'Can edit' : 'Read-only') + '</small></div>').join('');
+  const inviteRows = invitations.map(invitation => '<div class="invitation-row"><div><strong>' + esc(invitation.email) + '</strong><small>' + (invitation.status === 'accepted' ? 'Joined' : 'Invitation pending') + '</small></div><select class="invite-role-select" data-invitation-id="' + esc(invitation.id) + '" aria-label="Role for ' + esc(invitation.email) + '"><option value="viewer" ' + (invitation.role === 'viewer' ? 'selected' : '') + '>Read-only</option><option value="editor" ' + (invitation.role === 'editor' ? 'selected' : '') + '>Can edit</option></select><button class="ghost-btn invitation-remove" data-action="revoke-invitation" data-invitation-id="' + esc(invitation.id) + '" title="Remove access">Remove</button></div>').join('');
+  const fallbackLink = modal.invitationUrl ? '<div class="invite-fallback"><strong>' + (modal.invitationDelivered ? 'Invitation email sent' : 'Invitation link ready') + '</strong><p>' + (modal.invitationDelivered ? 'You can also copy the secure link if you need to share it another way.' : 'Email delivery is not configured on this server yet. Copy this link and send it to the invitee.') + '</p><div class="share-link-row"><input class="inline-input" id="invitation-link" value="' + esc(modal.invitationUrl) + '" readonly /><button class="secondary-btn" data-action="copy-invitation-link">Copy</button></div></div>' : '';
+  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small modal--share" data-stop><div class="modal-head"><h2>Share ' + esc(board.title) + '</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><div class="share-section"><div class="modal-label" style="margin-top:0">Invite people</div><form id="invite-form" class="invite-form"><input class="inline-input" id="invite-email" type="email" placeholder="name@example.com" aria-label="Email address" required /><select class="inline-input" id="invite-role" aria-label="Permission"><option value="viewer">Read-only</option><option value="editor">Can edit</option></select><button class="primary-btn" type="submit">Invite</button></form><p class="modal-hint">They will receive an email with a secure invitation link. They must use this email address to join.</p>' + fallbackLink + '</div><div class="share-section"><div class="modal-label" style="margin-top:0">People with access</div><div class="shared-members-list">' + members + inviteRows + (members || inviteRows ? '' : '<div class="empty">No one else has access yet.</div>') + '</div></div><div class="share-section"><div class="modal-label" style="margin-top:0">Public link</div><div class="share-status ' + (isPublic ? 'is-public' : '') + '"><span>' + (isPublic ? 'Public link enabled' : 'Private board') + '</span><p>' + (isPublic ? 'Anyone with the public link can view this board without an account. They cannot edit it or see your other boards.' : 'This board is private. Public links are read-only and separate from member invitations.') + '</p></div><label class="public-share-toggle"><input id="public-share-toggle" type="checkbox" ' + (isPublic ? 'checked' : '') + ' /><span><strong>Allow public viewing</strong><small>Anyone with the link can view this board without signing in.</small></span></label>' + (isPublic ? '<div class="field"><label for="public-share-link">Public board link</label><div class="share-link-row"><input class="inline-input" id="public-share-link" value="' + esc(publicLink) + '" readonly /><button class="secondary-btn" data-action="copy-public-board-link">Copy</button></div><button class="ghost-btn revoke-public-share" data-action="revoke-public-share">Disable public link</button></div>' : '') + '</div></div><div class="modal-form-footer"><button class="primary-btn close" data-action="close-modal">Done</button></div></div></div>';
   $('#public-share-toggle').addEventListener('change', event => updatePublicShare(event.target.checked));
+  $('#invite-form').addEventListener('submit', submitBoardInvitation);
+  document.querySelectorAll('.invite-role-select').forEach(select => select.addEventListener('change', event => updateBoardInvitation(event.target.dataset.invitationId, event.target.value)));
+  if (!modal.invitationsLoaded) loadBoardInvitations();
+}
+async function loadBoardInvitations() {
+  if (modal?.type !== 'share' || !canManageBoard()) return;
+  modal.invitationsLoaded = true;
+  try { const result = await api('/api/board-invitations?boardId=' + encodeURIComponent(currentBoard().id)); if (modal?.type !== 'share') return; modal.invitations = result.invitations || []; renderShareModal(); } catch (error) { notify(error.message); }
+}
+async function submitBoardInvitation(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const email = $('#invite-email').value.trim();
+  const role = $('#invite-role').value;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try { const result = await api('/api/board-invitations', { method: 'POST', body: JSON.stringify({ boardId: currentBoard().id, email, role, appUrl: window.location.origin + appRoot }) }); if (modal?.type !== 'share') return; modal.invitationUrl = result.invitationUrl; modal.invitationDelivered = result.emailDelivered; modal.invitationsLoaded = false; renderShareModal(); notify(result.emailDelivered ? 'Invitation email sent' : 'Invitation created'); } catch (error) { button.disabled = false; notify(error.message); }
+}
+async function updateBoardInvitation(invitationId, role) {
+  try { const result = await api('/api/board-invitations/' + encodeURIComponent(invitationId), { method: 'PATCH', body: JSON.stringify({ role }) }); const member = currentBoard().members?.find(item => item.id === result.memberId); if (member) member.role = role; if (modal?.type !== 'share') return; modal.invitationsLoaded = false; renderShareModal(); notify('Permission updated'); } catch (error) { notify(error.message); }
+}
+async function revokeBoardInvitation(invitationId) {
+  try { const result = await api('/api/board-invitations/' + encodeURIComponent(invitationId), { method: 'PATCH', body: JSON.stringify({ revoked: true }) }); if (result.memberId) currentBoard().members = (currentBoard().members || []).filter(member => member.id !== result.memberId); if (modal?.type !== 'share') return; modal.invitationsLoaded = false; renderShareModal(); notify('Board access removed'); } catch (error) { notify(error.message); }
 }
 async function updatePublicShare(enabled) {
   const board = currentBoard();
@@ -404,7 +500,7 @@ async function updatePublicShare(enabled) {
   try {
     const result = await api('/api/board-public-share', { method: 'POST', body: JSON.stringify({ boardId: board.id, enabled }) });
     board.publicShare = result.publicShare;
-    renderShareModal();
+    if (modal?.type === 'share') { modal.invitationsLoaded = false; renderShareModal(); }
     notify(enabled ? 'Public link enabled' : 'Public link disabled');
   } catch (error) {
     if (toggle) { toggle.checked = !enabled; toggle.disabled = false; }
@@ -535,6 +631,15 @@ function renderModal() {
   const availableMembers = board.members && board.members.length ? board.members : [{ id: 'member_you', name: state.user.name, initials: state.user.avatar || initials(state.user.name), color: '#17b897' }];
   const memberPicker = modal.memberPicker ? '<div class=\"member-picker\"><div class=\"member-picker-title\">People on this board</div>' + availableMembers.map(member => { const selected = (card.members || []).includes(member.id); return '<button class=\"member-option ' + (selected ? 'selected' : '') + '\" data-action=\"toggle-member\" data-member-id=\"' + esc(member.id) + '\" aria-pressed=\"' + selected + '\"><span class=\"member-avatar\" style=\"background:' + esc(member.color || '#17b897') + '\">' + esc(member.initials || initials(member.name)) + '</span><span>' + esc(member.name) + '</span><span class=\"member-check\">' + (selected ? '✓' : '') + '</span></button>'; }).join('') + '</div>' : '';
   root.innerHTML = '<div class=\"modal-layer\" data-action=\"close-modal\"><div class=\"modal modal--card\" data-stop><div class=\"modal-head\"><div style=\"flex:1\"><div class=\"modal-label\" style=\"margin-top:0\">' + esc(list.title) + '</div><input class=\"detail-input\" id=\"detail-title\" value=\"' + esc(card.title) + '\" /></div><button class=\"icon-btn close\" data-action=\"close-modal\" aria-label=\"Close\">×</button></div><div class=\"modal-body\"><div class=\"card-layout\"><div><div class=\"modal-label\">Description</div><textarea class=\"detail-input description-input\" id=\"detail-description\" placeholder=\"Add a description to your card...\">' + esc(card.description || '') + '</textarea><div class=\"modal-label\">Labels</div><div class=\"labels\" id=\"detail-labels\">' + labels + '<button class=\"ghost-btn\" style=\"padding:3px 5px;font-size:12px\" data-action=\"add-label\">＋ Add label</button></div><div class=\"modal-label checklist-head\"><span>Checklist</span><span style=\"color:var(--muted-2)\">' + done + '/' + (card.checklist || []).length + '</span></div><div>' + checks + '</div><div class=\"checklist-add\"><input class=\"inline-input\" id=\"check-item\" placeholder=\"Add an item\" /><button class=\"secondary-btn\" data-action=\"add-check\">Add</button></div><div class=\"modal-label\">Attachments</div><div class=\"attachment-grid\">' + attachments + '</div><label class=\"secondary-btn\" style=\"display:inline-flex;margin-top:10px;font-size:12px;cursor:pointer\">＋ Add attachment<input id=\"attachment-input\" type=\"file\" multiple hidden /></label><div class=\"comments\"><div class=\"modal-label\" style=\"margin-top:0\">Activity</div>' + comments + '<div class=\"comment-compose\"><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span><textarea class=\"field input\" id=\"comment-input\" placeholder=\"Write a comment... (⌘ Enter to post)\"></textarea><button class=\"primary-btn\" data-action=\"add-comment\">Post</button></div></div></div><aside class=\"detail-side\"><div class=\"modal-label\" style=\"margin-top:0\">Add to card</div><button class=\"side-action\" data-action=\"set-due\">◷ ' + (card.due ? 'Due ' + formatDate(card.due) : 'Due date') + '</button>' + (card.due ? '<button class=\"side-action compact-action\" data-action=\"clear-due\">Remove due date</button>' : '') + '<button class=\"side-action\" data-action=\"add-label\">▰ Labels</button><button class=\"side-action\" data-action=\"add-member\">♙ Members</button>' + memberPicker + '<div class=\"modal-label\">Card actions</div><button class=\"side-action\" data-action=\"duplicate-card\">▣ Duplicate</button><button class=\"side-action\" data-action=\"archive-card\" style=\"color:#ff9e7a\">⌫ Archive card</button></aside></div></div></div></div>';
+  if (!canEditBoard(board)) {
+    root.classList.add('card-modal-read-only');
+    $('#detail-title', root).readOnly = true;
+    $('#detail-description', root).readOnly = true;
+    root.querySelectorAll('input[type="checkbox"], .checklist-item-actions, .checklist-add, #detail-labels button, .remove-attachment, .detail-side .side-action, .comment-compose, label[for="attachment-input"]').forEach(element => element.remove());
+    $('#attachment-input', root)?.closest('label')?.remove();
+    const detailSide = $('.detail-side', root);
+    if (detailSide) detailSide.innerHTML = '<div class="modal-label" style="margin-top:0">Access</div><p class="modal-hint">You have read-only access to this board.</p>';
+  }
   const closeButton = $('.modal-head .close', root);
   closeButton?.insertAdjacentHTML('beforebegin', '<span class="card-save-status" role="status" aria-live="polite">' + esc(cardSaveStatus) + '</span>');
   setCardSaveStatus(cardSaveStatus);
@@ -549,7 +654,7 @@ function renderModal() {
   }
   $('#detail-title').addEventListener('input', event => { selectedCard().card.title = event.target.value; persist(); });
   $('#detail-description').addEventListener('input', event => { selectedCard().card.description = event.target.value; persist(); });
-  $('#attachment-input').addEventListener('change', handleAttachments);
+  $('#attachment-input')?.addEventListener('change', handleAttachments);
 }
 function renderSettings() {
   const themes = themeOptions.map(theme => '<button class=\"theme-choice ' + (state.theme === theme.id ? 'active' : '') + '\" data-action=\"set-theme\" data-theme=\"' + theme.id + '\"><strong>' + theme.name + '</strong><div class=\"theme-preview ' + theme.preview + '\"></div></button>').join('');
@@ -628,6 +733,9 @@ async function handleBackupImport(event) {
 
 function handleAction(action, target) {
   const board = currentBoard();
+  if (!board) return;
+  if (!canManageBoard(board) && ['board-settings', 'change-board-color', 'rename-board', 'edit-board-description', 'toggle-star', 'archive-board', 'delete-board', 'share', 'invite', 'clear-board-background'].includes(action)) return notify('Only the board owner can do that');
+  if (!canEditBoard(board) && ['toggle-card-star', 'add-list', 'rename-list', 'add-card-top', 'add-card', 'toggle-check', 'add-check', 'edit-check', 'cancel-check', 'save-check', 'move-check-up', 'move-check-down', 'remove-check', 'add-label', 'remove-label', 'set-due', 'clear-due', 'add-member', 'toggle-member', 'duplicate-card', 'archive-card', 'remove-attachment', 'add-comment'].includes(action)) return;
   if (action === 'open-card') return openCard(target.dataset.id, target.dataset.list);
   if (action === 'toggle-card-star') {
     const item = board.lists.flatMap(list => list.cards).find(card => card.id === target.dataset.id);
@@ -687,7 +795,7 @@ function handleAction(action, target) {
   if (action === 'due-filter') { state.view = 'board'; state.onlyDue = !state.onlyDue; return renderApp(); }
   if (action === 'starred-filter') { state.view = 'board'; state.onlyStarred = !state.onlyStarred; return renderApp(); }
   if (action === 'add-board') return openInputModal({ heading: 'Create a board', label: 'Board name', placeholder: 'e.g. Product launch', submitLabel: 'Create board', onSubmit: title => {
-    const newBoard = { id: uid('board'), title, description: '', color: '#8f7aea', background: 'aurora', starred: false, members: [], lists: [{ id: uid('list'), title: 'To do', cards: [] }, { id: uid('list'), title: 'In progress', cards: [] }, { id: uid('list'), title: 'Done', cards: [] }] };
+    const newBoard = { id: uid('board'), title, description: '', color: '#8f7aea', background: 'aurora', starred: false, members: [{ id: state.user.id, name: state.user.name, initials: state.user.avatar || initials(state.user.name), color: '#17b897', role: 'owner' }], lists: [{ id: uid('list'), title: 'To do', cards: [] }, { id: uid('list'), title: 'In progress', cards: [] }, { id: uid('list'), title: 'Done', cards: [] }] };
     state.boards.push(newBoard); ensureBoardSlugs(state.boards); state.boardId = newBoard.id; state.view = 'board'; rememberBoard(newBoard); updateBoardUrl(newBoard); persist(); renderApp();
   }});
   if (action === 'rename-board') return openInputModal({ heading: 'Rename board', label: 'Board name', value: board.title, submitLabel: 'Save changes', onSubmit: title => { board.title = title; persist(); renderApp(); }});
@@ -708,6 +816,13 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'revoke-public-share') return updatePublicShare(false);
+  if (action === 'copy-invitation-link') {
+    const link = $('#invitation-link').value;
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(() => notify('Invitation link copied')).catch(() => notify('Select and copy the invitation link'));
+    else { $('#invitation-link').select(); document.execCommand('copy'); notify('Invitation link copied'); }
+    return;
+  }
+  if (action === 'revoke-invitation') return revokeBoardInvitation(target.dataset.invitationId);
   if (action === 'copy-board-link') {
     const link = $('#share-link').value;
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(() => notify('Board link copied')).catch(() => notify('Select and copy the board link'));
@@ -816,8 +931,19 @@ async function bootPublicBoard(token) {
     renderPublicBoard(result.board);
   } catch (error) { renderPublicError(error.message || 'This link may have been disabled or copied incorrectly.'); }
 }
+async function bootInvitation(token) {
+  try {
+    pendingInvitationToken = token;
+    pendingInvitation = (await api('/api/invitations/' + encodeURIComponent(token))).invitation;
+    const session = await api('/api/session');
+    if (session.user) await finishAuthentication(session);
+    else renderAuth('login', '', pendingInvitation);
+  } catch (error) { renderAuth('login', error.message); }
+}
 (async function boot() {
   const token = publicShareToken();
   if (token) return bootPublicBoard(token);
+  const invite = invitationToken();
+  if (invite) return bootInvitation(invite);
   try { const result = await api('/api/session'); if (result.user) applySession(result); else renderAuth(); } catch (error) { renderAuth('login', error.message); }
 })();

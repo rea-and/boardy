@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,6 +18,106 @@ fs.mkdirSync(dataDir, { recursive: true });
 const now = () => new Date().toISOString();
 const id = (prefix = 'id') => `${prefix}_${crypto.randomBytes(7).toString('hex')}`;
 const safeUser = (user) => ({ id: user.id, name: user.name, email: user.email, avatar: user.avatar });
+const normalizeRole = role => role === 'editor' ? 'editor' : 'viewer';
+const clone = value => JSON.parse(JSON.stringify(value));
+const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
+
+function membershipsFor(user) {
+  return Array.isArray(user.data?.memberships) ? user.data.memberships : [];
+}
+
+function findOwnedBoard(user, boardId) {
+  return (user.data?.boards || []).find(board => board.id === boardId && !board.archived);
+}
+
+function findInvitation(store, token) {
+  const hash = sha256(token || '');
+  return (store.invitations || []).find(invitation => invitation.tokenHash === hash && invitation.status === 'pending' && (!invitation.expiresAt || invitation.expiresAt > Date.now())) || null;
+}
+
+function invitationView(store, invitation) {
+  const owner = store.users.find(user => user.id === invitation.ownerId);
+  const board = owner && findOwnedBoard(owner, invitation.boardId);
+  if (!owner || !board) return null;
+  return { id: invitation.id, email: invitation.email, role: normalizeRole(invitation.role), boardId: invitation.boardId, boardTitle: board.title, ownerName: owner.name, invitedAt: invitation.invitedAt, expiresAt: invitation.expiresAt, status: invitation.status };
+}
+
+function memberProfile(user, role) {
+  return { id: user.id, name: user.name, initials: user.avatar || String(user.name || '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(), color: '#17b897', role: role === 'owner' ? 'owner' : normalizeRole(role) };
+}
+
+function boardForClient(board, owner, role) {
+  const copy = clone(board);
+  copy.accessRole = role;
+  copy.ownerId = owner.id;
+  if (role !== 'owner') delete copy.publicShare;
+  return copy;
+}
+
+function workspaceData(store, user) {
+  const owned = (user.data?.boards || []).map(board => {
+    const copy = boardForClient(board, user, 'owner');
+    ensureBoardMember(copy, user, 'owner');
+    return copy;
+  });
+  const shared = membershipsFor(user).flatMap(membership => {
+    const owner = store.users.find(candidate => candidate.id === membership.ownerId);
+    const board = owner && findOwnedBoard(owner, membership.boardId);
+    if (!board) return [];
+    const copy = boardForClient(board, owner, normalizeRole(membership.role));
+    ensureBoardMember(copy, owner, 'owner');
+    return [copy];
+  });
+  const { memberships, ...settings } = user.data || {};
+  return { ...settings, boards: owned.concat(shared) };
+}
+
+function stripClientBoard(board) {
+  const copy = clone(board);
+  delete copy.accessRole;
+  delete copy.ownerId;
+  return copy;
+}
+
+function ensureBoardMember(board, user, role) {
+  const members = Array.isArray(board.members) ? board.members.filter(member => member && member.id !== user.id && !(role === 'owner' && member.id === 'member_you')) : [];
+  board.members = members.concat(memberProfile(user, role));
+}
+
+function publicOrigin(req, requestedBase = '') {
+  const configured = process.env.BOARDY_PUBLIC_URL || requestedBase;
+  if (configured) {
+    try { const parsed = new URL(configured); if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return configured.replace(/\/+$/, ''); } catch {}
+  }
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+  return `${protocol}://${req.headers.host || 'localhost:' + port}`;
+}
+
+function sendInvitationEmail(to, ownerName, boardTitle, invitationUrl) {
+  const sendmailPath = process.env.BOARDY_SENDMAIL_PATH || '/usr/sbin/sendmail';
+  if (!fs.existsSync(sendmailPath)) {
+    console.warn(`Boardy invitation email not sent: configure a local sendmail service or BOARDY_SENDMAIL_PATH. Invitation link: ${invitationUrl}`);
+    return Promise.resolve(false);
+  }
+  const clean = value => String(value || '').replace(/[\r\n]+/g, ' ').trim();
+  const from = clean(process.env.BOARDY_MAIL_FROM || `Boardy <boardy@${reqHostName()}>`);
+  const subject = `${clean(ownerName)} invited you to join ${clean(boardTitle)} on Boardy`;
+  const message = `From: ${from}\r\nTo: ${clean(to)}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${clean(ownerName)} invited you to join the Boardy board "${clean(boardTitle)}".\n\nOpen this invitation to create an account or sign in:\n${invitationUrl}\n\nYou can view the board after accepting the invitation.\n`;
+  return new Promise(resolve => {
+    const child = spawn(sendmailPath, ['-t', '-i'], { stdio: ['pipe', 'ignore', 'ignore'] });
+    let settled = false;
+    const timer = setTimeout(() => { child.kill(); finish(false); }, 15_000);
+    const finish = delivered => { if (!settled) { settled = true; clearTimeout(timer); resolve(delivered); } };
+    child.on('error', () => finish(false));
+    child.on('close', code => finish(code === 0));
+    child.stdin.end(message);
+  });
+}
+
+function reqHostName() {
+  return process.env.BOARDY_MAIL_HOST || 'localhost';
+}
 
 function publicShareTokenExists(store, token) {
   return store.users.some(user => (user.data?.boards || []).some(board => board.publicShare?.token === token));
@@ -158,9 +259,15 @@ const server = http.createServer(async (req, res) => {
       const board = findPublicBoard(store, token);
       return board ? sendJson(res, 200, { board: publicBoardView(board) }) : sendJson(res, 404, { error: 'This public board link is no longer available.' });
     }
+    if (url.pathname.startsWith('/api/invitations/') && req.method === 'GET') {
+      const token = decodeURIComponent(url.pathname.slice('/api/invitations/'.length));
+      const invitation = findInvitation(store, token);
+      const view = invitation && invitationView(store, invitation);
+      return view ? sendJson(res, 200, { invitation: view }) : sendJson(res, 404, { error: 'This invitation is no longer available.' });
+    }
     if (url.pathname === '/api/session' && req.method === 'GET') {
       const user = currentUser(req, store);
-      return sendJson(res, 200, user ? { user: safeUser(user), data: user.data } : { user: null });
+      return sendJson(res, 200, user ? { user: safeUser(user), data: workspaceData(store, user) } : { user: null });
     }
     if (url.pathname === '/api/register' && req.method === 'POST') {
       if (authBlocked(req.socket.remoteAddress || 'unknown')) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
@@ -177,7 +284,7 @@ const server = http.createServer(async (req, res) => {
       store.sessions[token] = { userId: user.id, expires: Date.now() + 1000 * 60 * 60 * 24 * 14 };
       writeStore(store);
       clearAuthFailures(req.socket.remoteAddress || 'unknown');
-      return sendJson(res, 201, { user: safeUser(user), data: user.data }, { 'set-cookie': sessionCookie(token) });
+      return sendJson(res, 201, { user: safeUser(user), data: workspaceData(store, user) }, { 'set-cookie': sessionCookie(token) });
     }
     if (url.pathname === '/api/login' && req.method === 'POST') {
       if (authBlocked(req.socket.remoteAddress || 'unknown')) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
@@ -189,13 +296,13 @@ const server = http.createServer(async (req, res) => {
       store.sessions[token] = { userId: user.id, expires: Date.now() + 1000 * 60 * 60 * 24 * 14 };
       writeStore(store);
       clearAuthFailures(req.socket.remoteAddress || 'unknown');
-      return sendJson(res, 200, { user: safeUser(user), data: user.data }, { 'set-cookie': sessionCookie(token) });
+      return sendJson(res, 200, { user: safeUser(user), data: workspaceData(store, user) }, { 'set-cookie': sessionCookie(token) });
     }
     if (url.pathname === '/api/demo' && req.method === 'POST') {
       let user = store.users.find(item => item.email === 'demo@boardy.local');
       if (!user) { const credentials = hashPassword('boardy-demo'); user = { id: id('user'), name: 'Alex Morgan', email: 'demo@boardy.local', avatar: 'AM', passwordSalt: credentials.salt, passwordHash: credentials.hash, data: { boards: [seedBoard('Alex’s workspace')], theme: 'dark', wallpaper: 'aurora', sidebarCollapsed: false }, createdAt: now() }; store.users.push(user); }
       const token = crypto.randomBytes(32).toString('hex'); store.sessions[token] = { userId: user.id, expires: Date.now() + 1000 * 60 * 60 * 24 * 14 }; writeStore(store);
-      return sendJson(res, 200, { user: safeUser(user), data: user.data }, { 'set-cookie': sessionCookie(token) });
+      return sendJson(res, 200, { user: safeUser(user), data: workspaceData(store, user) }, { 'set-cookie': sessionCookie(token) });
     }
     if (url.pathname === '/api/logout' && req.method === 'POST') {
       const token = parseCookies(req).boardy_session; if (token) delete store.sessions[token]; writeStore(store);
@@ -204,8 +311,100 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/data' && req.method === 'PUT') {
       const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
       const body = await readBody(req); if (!body || !Array.isArray(body.boards)) return sendJson(res, 400, { error: 'Invalid workspace data.' });
-      user.data = { boards: body.boards, theme: validThemes.has(body.theme) ? body.theme : 'dark', wallpaper: String(body.wallpaper || 'aurora').slice(0, 2_000_000), sidebarCollapsed: Boolean(body.sidebarCollapsed) }; writeStore(store);
+      const existingOwned = user.data?.boards || [];
+      const ownedIds = new Set(existingOwned.map(board => board.id));
+      const memberships = membershipsFor(user);
+      const membershipByBoard = new Map(memberships.map(membership => [membership.boardId, membership]));
+      const knownBoardIds = new Set(store.users.flatMap(candidate => (candidate.data?.boards || []).map(board => board.id)));
+      const nextOwned = [];
+      for (const incoming of body.boards) {
+        if (!incoming || typeof incoming !== 'object' || !incoming.id) continue;
+        const membership = membershipByBoard.get(incoming.id);
+        if (membership) {
+          if (normalizeRole(membership.role) !== 'editor') continue;
+          const owner = store.users.find(candidate => candidate.id === membership.ownerId);
+          const ownerBoard = owner && (owner.data?.boards || []).find(board => board.id === membership.boardId);
+          if (!ownerBoard) continue;
+          const updated = stripClientBoard(incoming);
+          if (ownerBoard.publicShare && !updated.publicShare) updated.publicShare = ownerBoard.publicShare;
+          owner.data.boards = (owner.data.boards || []).map(board => board.id === ownerBoard.id ? updated : board);
+          continue;
+        }
+        if (!ownedIds.has(incoming.id) && knownBoardIds.has(incoming.id)) continue;
+        nextOwned.push(stripClientBoard(incoming));
+      }
+      user.data = { ...user.data, boards: nextOwned, memberships, theme: validThemes.has(body.theme) ? body.theme : 'dark', wallpaper: String(body.wallpaper || 'aurora').slice(0, 2_000_000), sidebarCollapsed: Boolean(body.sidebarCollapsed) };
+      writeStore(store);
       return sendJson(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/board-invitations' && req.method === 'GET') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
+      const board = findOwnedBoard(user, url.searchParams.get('boardId') || '');
+      if (!board) return sendJson(res, 403, { error: 'Only the board owner can manage invitations.' });
+      const invitations = (store.invitations || []).filter(invitation => invitation.ownerId === user.id && invitation.boardId === board.id).map(invitation => invitationView(store, invitation)).filter(Boolean);
+      return sendJson(res, 200, { invitations });
+    }
+    if (url.pathname === '/api/board-invitations' && req.method === 'POST') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
+      const body = await readBody(req);
+      const board = findOwnedBoard(user, String(body.boardId || ''));
+      if (!board) return sendJson(res, 403, { error: 'Only the board owner can invite people to this board.' });
+      const email = String(body.email || '').trim().toLowerCase().slice(0, 160);
+      const role = normalizeRole(body.role);
+      if (!/^\S+@\S+\.\S+$/.test(email)) return sendJson(res, 400, { error: 'Enter a valid email address.' });
+      if (email === user.email) return sendJson(res, 400, { error: 'You already own this board.' });
+      const existingMember = store.users.find(candidate => candidate.email === email && membershipsFor(candidate).some(membership => membership.ownerId === user.id && membership.boardId === board.id));
+      if (existingMember) return sendJson(res, 409, { error: 'That person is already a member of this board.' });
+      store.invitations = (store.invitations || []).map(invitation => invitation.ownerId === user.id && invitation.boardId === board.id && invitation.email === email && invitation.status === 'pending' ? { ...invitation, status: 'revoked', revokedAt: Date.now() } : invitation);
+      const token = crypto.randomBytes(32).toString('base64url');
+      const invitation = { id: id('invite'), tokenHash: sha256(token), ownerId: user.id, boardId: board.id, email, role, status: 'pending', invitedAt: now(), expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 30 };
+      store.invitations.push(invitation);
+      writeStore(store);
+      const invitationUrl = `${publicOrigin(req, body.appUrl)}/invite-${token}`;
+      const emailDelivered = await sendInvitationEmail(email, user.name, board.title, invitationUrl);
+      return sendJson(res, 201, { invitation: invitationView(store, invitation), invitationUrl, emailDelivered });
+    }
+    if (url.pathname.startsWith('/api/board-invitations/') && req.method === 'PATCH') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
+      const invitationId = decodeURIComponent(url.pathname.slice('/api/board-invitations/'.length));
+      const invitation = (store.invitations || []).find(item => item.id === invitationId && item.ownerId === user.id);
+      if (!invitation) return sendJson(res, 404, { error: 'Invitation not found.' });
+      const board = findOwnedBoard(user, invitation.boardId);
+      if (!board) return sendJson(res, 403, { error: 'Only the board owner can manage invitations.' });
+      const body = await readBody(req);
+      const member = invitation.acceptedBy && store.users.find(candidate => candidate.id === invitation.acceptedBy);
+      const memberId = member?.id || null;
+      if (body.revoked) {
+        invitation.status = 'revoked'; invitation.revokedAt = Date.now();
+        if (member) {
+          member.data.memberships = membershipsFor(member).filter(membership => !(membership.ownerId === user.id && membership.boardId === board.id));
+          board.members = (board.members || []).filter(item => item.id !== member.id);
+        }
+      } else {
+        invitation.role = normalizeRole(body.role);
+        if (member) {
+          const membership = membershipsFor(member).find(item => item.ownerId === user.id && item.boardId === board.id);
+          if (membership) membership.role = invitation.role;
+          ensureBoardMember(board, member, invitation.role);
+        }
+      }
+      writeStore(store);
+      return sendJson(res, 200, { invitation: invitationView(store, invitation), memberId });
+    }
+    if (url.pathname.startsWith('/api/invitations/') && req.method === 'POST') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in or create an account first.' });
+      const token = decodeURIComponent(url.pathname.slice('/api/invitations/'.length));
+      const invitation = findInvitation(store, token);
+      if (!invitation) return sendJson(res, 404, { error: 'This invitation is no longer available.' });
+      if (user.email !== invitation.email) return sendJson(res, 403, { error: 'Sign in with the email address that received this invitation.' });
+      const owner = store.users.find(candidate => candidate.id === invitation.ownerId);
+      const board = owner && findOwnedBoard(owner, invitation.boardId);
+      if (!owner || !board || owner.id === user.id) return sendJson(res, 404, { error: 'This invitation is no longer available.' });
+      user.data.memberships = membershipsFor(user).filter(membership => !(membership.ownerId === owner.id && membership.boardId === board.id)).concat({ ownerId: owner.id, boardId: board.id, role: normalizeRole(invitation.role), acceptedAt: now() });
+      ensureBoardMember(board, user, invitation.role);
+      invitation.status = 'accepted'; invitation.acceptedBy = user.id; invitation.acceptedAt = now();
+      writeStore(store);
+      return sendJson(res, 200, { boardId: board.id, role: normalizeRole(invitation.role) });
     }
     if (url.pathname === '/api/board-public-share' && req.method === 'POST') {
       const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
