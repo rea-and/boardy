@@ -96,21 +96,51 @@ function publicOrigin(req, requestedBase = '') {
 
 function sendInvitationEmail(to, ownerName, boardTitle, invitationUrl) {
   const sendmailPath = process.env.BOARDY_SENDMAIL_PATH || '/usr/sbin/sendmail';
-  if (!fs.existsSync(sendmailPath)) {
+  try { fs.accessSync(sendmailPath, fs.constants.X_OK); } catch {
     console.warn(`Boardy invitation email not sent: configure a local sendmail service or BOARDY_SENDMAIL_PATH. Invitation link: ${invitationUrl}`);
     return Promise.resolve(false);
   }
   const clean = value => String(value || '').replace(/[\r\n]+/g, ' ').trim();
   const from = clean(process.env.BOARDY_MAIL_FROM || `Boardy <boardy@${reqHostName()}>`);
   const subject = `${clean(ownerName)} invited you to join ${clean(boardTitle)} on Boardy`;
-  const message = `From: ${from}\r\nTo: ${clean(to)}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${clean(ownerName)} invited you to join the Boardy board "${clean(boardTitle)}".\n\nOpen this invitation to create an account or sign in:\n${invitationUrl}\n\nYou can view the board after accepting the invitation.\n`;
+  const message = [
+    `From: ${from}`,
+    `To: ${clean(to)}`,
+    `Subject: ${subject}`,
+    `Date: ${new Date().toUTCString()}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    `${clean(ownerName)} invited you to join the Boardy board "${clean(boardTitle)}".`,
+    '',
+    'Open this invitation to create an account or sign in:',
+    invitationUrl,
+    '',
+    'You can view the board after accepting the invitation.',
+    ''
+  ].join('\r\n');
   return new Promise(resolve => {
-    const child = spawn(sendmailPath, ['-t', '-i'], { stdio: ['pipe', 'ignore', 'ignore'] });
+    const child = spawn(sendmailPath, ['-t', '-i'], { stdio: ['pipe', 'ignore', 'pipe'] });
+    let errorOutput = '';
     let settled = false;
     const timer = setTimeout(() => { child.kill(); finish(false); }, 15_000);
     const finish = delivered => { if (!settled) { settled = true; clearTimeout(timer); resolve(delivered); } };
-    child.on('error', () => finish(false));
-    child.on('close', code => finish(code === 0));
+    child.stderr?.on('data', chunk => { errorOutput = (errorOutput + chunk.toString()).slice(-2_000); });
+    child.on('error', error => {
+      console.warn(`Boardy invitation email failed to start: ${error.message}. Invitation link: ${invitationUrl}`);
+      finish(false);
+    });
+    child.on('close', (code, signal) => {
+      if (code !== 0) {
+        const detail = errorOutput.trim().replace(/[\r\n]+/g, ' ');
+        console.warn(`Boardy invitation email was rejected by ${sendmailPath} (exit ${code ?? 'unknown'}${signal ? `, signal ${signal}` : ''})${detail ? `: ${detail}` : ''}. Invitation link: ${invitationUrl}`);
+      }
+      finish(code === 0);
+    });
+    child.stdin.on('error', error => {
+      console.warn(`Boardy invitation email input failed: ${error.message}. Invitation link: ${invitationUrl}`);
+      finish(false);
+    });
     child.stdin.end(message);
   });
 }
