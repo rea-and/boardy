@@ -84,8 +84,17 @@ function routeBoardSlug() {
   const raw = segments[rootIndex + 1] || (appRoot ? '' : segments[0] || '');
   try { return decodeURIComponent(raw).toLowerCase(); } catch { return raw.toLowerCase(); }
 }
+function publicShareToken() {
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const rootSegment = appRoot.slice(1);
+  const rootIndex = rootSegment ? segments.indexOf(rootSegment) : -1;
+  const marker = segments[rootIndex + 1] || '';
+  if (!marker.startsWith('public-')) return '';
+  try { return decodeURIComponent(marker.slice('public-'.length)); } catch { return marker.slice('public-'.length); }
+}
 function boardSlug(board) { return board.slug || slugifyBoardTitle(board.title); }
 function boardUrl(board) { return (appRoot || '') + '/' + encodeURIComponent(boardSlug(board)); }
+function publicBoardUrl(board) { return (appRoot || '') + '/public-' + encodeURIComponent(board.publicShare.token); }
 function workspaceUrl() { return appRoot || '/'; }
 function updateBoardUrl(board, replace = false) {
   const next = board ? boardUrl(board) : workspaceUrl();
@@ -217,6 +226,28 @@ function applyBoardBackground(board = currentBoard()) {
   const image = isImageData(board && board.background) ? 'url("' + board.background + '")' : '';
   shell.style.backgroundImage = image;
   shell.classList.toggle('has-board-background', Boolean(image));
+}
+
+function safePublicColor(value) { return /^#[0-9a-f]{3,8}$/i.test(String(value || '')) ? value : '#17b897'; }
+function renderPublicCard(card) {
+  const labels = (card.labels || []).map(label => '<span class="label ' + esc(label.color || '') + '">' + esc(label.name) + '</span>').join('');
+  const checklist = card.checklist || [];
+  const done = checklist.filter(item => item.done).length;
+  const checklistMarkup = checklist.length ? '<div class="public-checklist"><div><strong>Checklist</strong><span>' + done + '/' + checklist.length + '</span></div>' + checklist.map(item => '<div class="public-check-item ' + (item.done ? 'done' : '') + '"><span>' + (item.done ? '✓' : '') + '</span>' + esc(item.text) + '</div>').join('') + '</div>' : '';
+  const attachments = (card.attachments || []).filter(item => item.data || item.name).map(item => item.data && item.data.startsWith('data:image/') ? '<a class="public-attachment public-attachment-image" href="' + esc(item.data) + '" target="_blank" rel="noopener noreferrer"><img src="' + esc(item.data) + '" alt="' + esc(item.name) + '" /><span>' + esc(item.name) + '</span></a>' : '<div class="public-attachment"><span>⌕</span><span>' + esc(item.name) + '</span></div>').join('');
+  const comments = (card.comments || []).map(comment => '<div class="public-comment"><div><strong>' + esc(comment.author) + '</strong><time>' + esc(formatDate(comment.time)) + '</time></div><p>' + linkify(comment.text) + '</p></div>').join('');
+  return '<article class="public-card"><div class="public-card-head"><h3>' + esc(card.title) + '</h3>' + (card.due ? '<span class="public-card-due">◷ ' + esc(formatDate(card.due)) + '</span>' : '') + '</div>' + (labels ? '<div class="labels">' + labels + '</div>' : '') + (card.description ? '<div class="public-card-description">' + linkify(card.description) + '</div>' : '') + (checklistMarkup || '') + (attachments ? '<div class="public-card-section"><strong>Attachments</strong><div class="public-attachments">' + attachments + '</div></div>' : '') + (comments ? '<div class="public-card-section"><strong>Activity</strong>' + comments + '</div>' : '') + '</article>';
+}
+function renderPublicBoard(board) {
+  const lists = (board.lists || []).map(list => '<section class="public-column"><header><h2>' + esc(list.title) + '</h2><span>' + (list.cards || []).length + '</span></header>' + ((list.cards || []).length ? list.cards.map(renderPublicCard).join('') : '<div class="public-empty">Nothing here yet</div>') + '</section>').join('');
+  const description = board.description ? '<p class="public-board-description">' + linkify(board.description) + '</p>' : '';
+  $('#app').innerHTML = '<div class="public-shell"><header class="public-topbar"><a class="public-brand" href="' + esc(workspaceUrl()) + '"><span class="brand-mark"><span></span><span></span></span><span>Boardy</span></a><span class="public-readonly">Read-only public board</span></header><main class="public-board"><section class="public-board-head"><div><div class="public-title-line"><span class="public-board-color" style="background:' + esc(safePublicColor(board.color)) + '"></span><h1>' + esc(board.title) + '</h1></div>' + description + '</div><span class="public-access-note">Anyone with this link can view this board</span></section><div class="public-columns">' + lists + '</div></main></div>';
+  const shell = $('.public-shell');
+  if (isImageData(board.background)) {
+    shell.style.backgroundImage = 'url("' + board.background + '")';
+    shell.classList.add('has-public-background');
+  }
+  document.title = board.title + ' · Boardy';
 }
 
 function renderApp() {
@@ -361,8 +392,24 @@ function renderConfirmModal() {
 }
 function renderShareModal() {
   const board = currentBoard();
-  $('#modal-root').innerHTML = '<div class=\"modal-layer\" data-action=\"close-modal\"><div class=\"modal modal--small\" data-stop><div class=\"modal-head\"><h2>Share ' + esc(board.title) + '</h2><button class=\"icon-btn close\" data-action=\"close-modal\" aria-label=\"Close\">×</button></div><div class=\"modal-body\"><div class=\"share-status\"><span>Private board</span><p>Boardy keeps this workspace behind account sign-in. Copy the link for a teammate who already has access to this server.</p></div><div class=\"field\"><label for=\"share-link\">Board link</label><div class=\"share-link-row\"><input class=\"inline-input\" id=\"share-link\" value=\"' + esc(window.location.href) + '\" readonly /><button class=\"secondary-btn\" data-action=\"copy-board-link\">Copy</button></div></div></div><div class=\"modal-form-footer\"><button class=\"primary-btn close\" data-action=\"close-modal\">Done</button></div></div></div>';
-  $('#share-link').value = window.location.origin + boardUrl(board);
+  const isPublic = Boolean(board.publicShare?.enabled && board.publicShare?.token);
+  const publicLink = isPublic ? window.location.origin + publicBoardUrl(board) : '';
+  $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Share ' + esc(board.title) + '</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><div class="modal-body"><div class="share-status ' + (isPublic ? 'is-public' : '') + '"><span>' + (isPublic ? 'Public link enabled' : 'Private board') + '</span><p>' + (isPublic ? 'Anyone with the public link can view this board without an account. They cannot edit it or see your other boards.' : 'Keep this board private, or enable a read-only link for anyone who needs to view it.') + '</p></div><label class="public-share-toggle"><input id="public-share-toggle" type="checkbox" ' + (isPublic ? 'checked' : '') + ' /><span><strong>Allow public viewing</strong><small>Anyone with the link can view this board without signing in.</small></span></label>' + (isPublic ? '<div class="field"><label for="public-share-link">Public board link</label><div class="share-link-row"><input class="inline-input" id="public-share-link" value="' + esc(publicLink) + '" readonly /><button class="secondary-btn" data-action="copy-public-board-link">Copy</button></div><button class="ghost-btn revoke-public-share" data-action="revoke-public-share">Disable public link</button></div>' : '') + '<div class="field private-board-link"><label for="share-link">Private board link</label><div class="share-link-row"><input class="inline-input" id="share-link" value="' + esc(window.location.origin + boardUrl(board)) + '" readonly /><button class="secondary-btn" data-action="copy-board-link">Copy</button></div></div></div><div class="modal-form-footer"><button class="primary-btn close" data-action="close-modal">Done</button></div></div></div>';
+  $('#public-share-toggle').addEventListener('change', event => updatePublicShare(event.target.checked));
+}
+async function updatePublicShare(enabled) {
+  const board = currentBoard();
+  const toggle = $('#public-share-toggle');
+  if (toggle) toggle.disabled = true;
+  try {
+    const result = await api('/api/board-public-share', { method: 'POST', body: JSON.stringify({ boardId: board.id, enabled }) });
+    board.publicShare = result.publicShare;
+    renderShareModal();
+    notify(enabled ? 'Public link enabled' : 'Public link disabled');
+  } catch (error) {
+    if (toggle) { toggle.checked = !enabled; toggle.disabled = false; }
+    notify(error.message);
+  }
 }
 function renderShortcutsModal() {
   const rows = [['?', 'Show keyboard shortcuts'], ['⌘ / Ctrl K', 'Focus card search'], ['/', 'Focus card search'], ['N', 'Create a card'], ['L', 'Create a list'], ['S', 'Open workspace settings'], ['Esc', 'Close the current dialog'], ['⌘ / Ctrl Enter', 'Post a card comment']];
@@ -654,6 +701,13 @@ function handleAction(action, target) {
     return openInputModal({ heading: 'Add a card', label: 'Card title', placeholder: 'What needs to happen?', submitLabel: 'Create card', onSubmit: title => { list.cards.push({ id: uid('card'), title, description: '', labels: [], due: '', checklist: [], attachments: [], members: [], comments: [] }); persist(); renderBoardOnly(); notify('Card added'); }});
   }
   if (action === 'invite' || action === 'share') return openShareModal();
+  if (action === 'copy-public-board-link') {
+    const link = $('#public-share-link').value;
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(() => notify('Public link copied')).catch(() => notify('Select and copy the public link'));
+    else { $('#public-share-link').select(); document.execCommand('copy'); notify('Public link copied'); }
+    return;
+  }
+  if (action === 'revoke-public-share') return updatePublicShare(false);
   if (action === 'copy-board-link') {
     const link = $('#share-link').value;
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(() => notify('Board link copied')).catch(() => notify('Select and copy the board link'));
@@ -753,4 +807,17 @@ window.addEventListener('popstate', () => {
   }
   renderApp();
 });
-(async function boot() { try { const result = await api('/api/session'); if (result.user) applySession(result); else renderAuth(); } catch (error) { renderAuth('login', error.message); } })();
+function renderPublicError(message) {
+  $('#app').innerHTML = '<div class="public-error"><div><span class="brand-mark"><span></span><span></span></span><h1>Public board unavailable</h1><p>' + esc(message) + '</p><a class="primary-btn" href="' + esc(workspaceUrl()) + '">Open Boardy</a></div></div>';
+}
+async function bootPublicBoard(token) {
+  try {
+    const result = await api('/api/public-board/' + encodeURIComponent(token));
+    renderPublicBoard(result.board);
+  } catch (error) { renderPublicError(error.message || 'This link may have been disabled or copied incorrectly.'); }
+}
+(async function boot() {
+  const token = publicShareToken();
+  if (token) return bootPublicBoard(token);
+  try { const result = await api('/api/session'); if (result.user) applySession(result); else renderAuth(); } catch (error) { renderAuth('login', error.message); }
+})();

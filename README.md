@@ -1,6 +1,6 @@
 # Boardy
 
-Boardy is a self-hosted kanban workspace inspired by the best parts of Trello. It includes multiple boards, flexible lists, rich cards, labels, checklists, members, due dates, comments, attachments with image previews, search, starring, drag-and-drop movement, themes, custom wallpapers, keyboard shortcuts, and portable workspace backups.
+Boardy is a self-hosted kanban workspace inspired by the best parts of Trello. It includes multiple boards, flexible lists, rich cards, labels, checklists, members, due dates, comments, attachments with image previews, search, starring, drag-and-drop movement, themes, custom wallpapers, keyboard shortcuts, portable workspace backups, and optional read-only public board links.
 
 Boardy is intentionally small and dependency-free. The browser client is served by a Node.js server, and workspace data is stored on disk in a JSON file. It can run on a small Ubuntu server without a separate database.
 
@@ -14,6 +14,12 @@ Boardy is intentionally small and dependency-free. The browser client is served 
 Docker users need Docker Engine and the Docker Compose plugin instead of a host Node.js installation.
 
 Boardy listens on port 4173 by default.
+
+## Public board links
+
+Open a board and choose **Share**, then enable **Allow public viewing**. Boardy creates a revocable, read-only link for that board. Anyone with the link can view the selected board without an account, including its lists, cards, descriptions, checklists, comments, labels, and supported image previews. Visitors cannot edit the board, open your workspace, or see any other board or account information.
+
+Disable the toggle in the same Share dialog to revoke the link. Public links should still be shared carefully because anyone who has the link can view the board while it is enabled.
 
 ## Choose an installation method
 
