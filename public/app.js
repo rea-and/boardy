@@ -348,8 +348,36 @@ function renderColumns(board) {
   return (board.lists || []).map((list, listIndex) => {
     const cards = list.cards.filter(card => (!search || searchableCard(card).includes(search)) && (!state.onlyDue || isDueSoon(card.due)) && (!state.onlyStarred || card.starred));
     const title = editable ? '<button class="column-title" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename ' + esc(list.title) + '">' + esc(list.title) + '</button>' : '<span class="column-title-text">' + esc(list.title) + '</span>';
-    const controls = editable ? '<div class="column-move-controls"><button data-action="move-list-left" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' left" title="Move list left" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button><button data-action="move-list-right" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' right" title="Move list right" ' + (listIndex === board.lists.length - 1 ? 'disabled' : '') + '>→</button></div><button class="column-drag" draggable="true" data-list="' + list.id + '" title="Drag to reorder list. When focused, use Left or Right Arrow to move it." aria-label="Reorder ' + esc(list.title) + '" aria-keyshortcuts="ArrowLeft ArrowRight">⠿</button><button class="icon-btn column-menu" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename list">···</button>' : '';
-    return '<section class="column" data-list="' + list.id + '"><div class="column-header"><h3>' + title + '</h3><span class="count">' + cards.length + '</span>' + controls + '</div>' + (cards.length ? cards.map(card => renderCard(card, list)).join('') : '<div class="empty"><strong>' + (search || state.onlyDue ? 'No matching cards' : 'Nothing here yet') + '</strong><span>' + (search || state.onlyDue ? 'Try another filter.' : 'Add a card to get moving.') + '</span></div>') + (editable ? '<button class="add-card" data-action="add-card" data-id="' + list.id + '">＋ Add a card</button>' : '') + '</section>';
+    const controls = editable
+      ? [
+          '<div class="column-move-controls">',
+          '<button data-action="move-list-left" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' left" title="Move list left" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button>',
+          '<button data-action="move-list-right" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' right" title="Move list right" ' + (listIndex === board.lists.length - 1 ? 'disabled' : '') + '>→</button>',
+          '</div>',
+          '<button class="column-drag" draggable="true" data-list="' + list.id + '" title="Drag to reorder list. When focused, use Left or Right Arrow to move it." aria-label="Reorder ' + esc(list.title) + '" aria-keyshortcuts="ArrowLeft ArrowRight">⠿</button>',
+          '<button class="icon-btn column-menu" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename list">···</button>'
+        ].join('')
+      : '';
+    const emptyContent = [
+      '<div class="empty">',
+      '<strong>' + (search || state.onlyDue ? 'No matching cards' : 'Nothing here yet') + '</strong>',
+      '<span>' + (search || state.onlyDue ? 'Try another filter.' : 'Add a card to get moving.') + '</span>',
+      '</div>'
+    ].join('');
+    const cardContent = cards.length
+      ? cards.map(card => renderCard(card, list)).join('')
+      : emptyContent;
+    const addCardButton = editable
+      ? '<button class="add-card" data-action="add-card" data-id="' + list.id + '">＋ Add a card</button>'
+      : '';
+
+    return [
+      '<section class="column" data-list="' + list.id + '">',
+      '<div class="column-header"><h3>' + title + '</h3><span class="count">' + cards.length + '</span>' + controls + '</div>',
+      '<div class="column-cards" role="region" tabindex="0" aria-label="Cards in ' + esc(list.title) + '">' + cardContent + '</div>',
+      addCardButton,
+      '</section>'
+    ].join('');
   }).join('');
 }
 function renderCard(card, list) {
@@ -358,15 +386,74 @@ function renderCard(card, list) {
   const listIndex = currentBoard().lists.findIndex(item => item.id === list.id);
   const done = (card.checklist || []).filter(item => item.done).length;
   const total = (card.checklist || []).length;
-  const people = card.members && card.members.length ? '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span>' : '';
-  const labels = card.labels && card.labels.length ? '<div class="labels">' + card.labels.map(label => '<span class="label ' + esc(label.color || '') + '">' + esc(label.name) + '</span>').join('') + '</div>' : '';
-  const footer = (card.due ? '<span class="card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '">◷ ' + formatDate(card.due) + '</span>' : '') + (total ? '<span class="card-stat progress"><span class="progress-bar"><i style="width:' + Math.round(done / total * 100) + '%"></i></span>' + done + '/' + total + '</span>' : '') + (card.attachments && card.attachments.length ? '<span class="card-stat">⌕ ' + card.attachments.length + '</span>' : '') + '<div class="avatars">' + people + '</div>';
-  const cardStar = editable ? '<button class="card-star ' + (card.starred ? 'active' : '') + '" data-action="toggle-card-star" data-id="' + card.id + '" data-list="' + list.id + '" title="Star card" aria-label="' + (card.starred ? 'Unstar card' : 'Star card') + '">★</button>' : '';
-  const cardMoves = editable ? '<div class="card-move-controls" aria-label="Move card"><button data-action="move-card-left" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to previous list" title="Previous list" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button><button data-action="move-card-up" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card up" title="Move up" ' + (cardIndex === 0 ? 'disabled' : '') + '>↑</button><button data-action="move-card-down" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card down" title="Move down" ' + (cardIndex === list.cards.length - 1 ? 'disabled' : '') + '>↓</button><button data-action="move-card-right" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to next list" title="Next list" ' + (listIndex === currentBoard().lists.length - 1 ? 'disabled' : '') + '>→</button></div>' : '';
-  return '<article class="card ' + (editable ? '' : 'card-read-only') + '" ' + (editable ? 'draggable="true" tabindex="0"' : 'tabindex="0"') + ' data-action="open-card" data-id="' + card.id + '" data-list="' + list.id + '">' + labels + '<div class="card-topline"><div class="card-title">' + esc(card.title) + '</div>' + cardStar + '</div>' + (card.description ? '<div class="card-description">' + linkifyPreview(card.description) + '</div>' : '') + '<div class="card-footer">' + footer + cardMoves + '</div></article>';
+  const people = card.members && card.members.length
+    ? '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span>'
+    : '';
+  const labels = card.labels && card.labels.length
+    ? '<div class="labels">' + card.labels.map(label =>
+      '<span class="label ' + esc(label.color || '') + '">' + esc(label.name) + '</span>'
+    ).join('') + '</div>'
+    : '';
+  const dueDate = card.due
+    ? '<span class="card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '">◷ ' + formatDate(card.due) + '</span>'
+    : '';
+  const checklistProgress = total
+    ? '<span class="card-stat progress"><span class="progress-bar"><i style="width:' + Math.round(done / total * 100) + '%"></i></span>' + done + '/' + total + '</span>'
+    : '';
+  const attachmentCount = card.attachments && card.attachments.length
+    ? '<span class="card-stat">⌕ ' + card.attachments.length + '</span>'
+    : '';
+  const footer = [
+    dueDate,
+    checklistProgress,
+    attachmentCount,
+    '<div class="avatars">' + people + '</div>'
+  ].join('');
+  const cardStar = editable
+    ? '<button class="card-star ' + (card.starred ? 'active' : '') + '" data-action="toggle-card-star" data-id="' + card.id + '" data-list="' + list.id + '" title="Star card" aria-label="' + (card.starred ? 'Unstar card' : 'Star card') + '">★</button>'
+    : '';
+  const cardMoves = editable
+    ? [
+        '<div class="card-move-controls" aria-label="Move card">',
+        '<button data-action="move-card-left" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to previous list" title="Previous list" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button>',
+        '<button data-action="move-card-up" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card up" title="Move up" ' + (cardIndex === 0 ? 'disabled' : '') + '>↑</button>',
+        '<button data-action="move-card-down" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card down" title="Move down" ' + (cardIndex === list.cards.length - 1 ? 'disabled' : '') + '>↓</button>',
+        '<button data-action="move-card-right" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to next list" title="Next list" ' + (listIndex === currentBoard().lists.length - 1 ? 'disabled' : '') + '>→</button>',
+        '</div>'
+      ].join('')
+    : '';
+  const description = card.description
+    ? '<div class="card-description">' + linkifyPreview(card.description) + '</div>'
+    : '';
+
+  return [
+    '<article class="card ' + (editable ? '' : 'card-read-only') + '" ' + (editable ? 'draggable="true" tabindex="0"' : 'tabindex="0"') + ' data-action="open-card" data-id="' + card.id + '" data-list="' + list.id + '">',
+    labels,
+    '<div class="card-topline"><div class="card-title">' + esc(card.title) + '</div>' + cardStar + '</div>',
+    description,
+    '<div class="card-footer">' + footer + cardMoves + '</div>',
+    '</article>'
+  ].join('');
 }
-function markTruncatedDescriptions(root = document) { root.querySelectorAll('.card-description').forEach(description => description.classList.toggle('is-truncated', description.scrollHeight > description.clientHeight + 1)); }
-function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + (canEditBoard(board) ? '<button class="add-list" data-action="add-list">＋ Add another list</button>' : ''); $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); markTruncatedDescriptions(); } }
+function markTruncatedDescriptions(root = document) {
+  root.querySelectorAll('.card-description').forEach(description => {
+    description.classList.toggle('is-truncated', description.scrollHeight > description.clientHeight + 1);
+  });
+}
+function renderBoardOnly() {
+  const board = currentBoard();
+  const columns = $('.columns');
+  if (!columns) return;
+
+  const addListButton = canEditBoard(board)
+    ? '<button class="add-list" data-action="add-list">＋ Add another list</button>'
+    : '';
+  columns.innerHTML = renderColumns(board) + addListButton;
+  $('.board-meta').textContent = allCards(board).length + ' cards';
+  wireDragAndDrop();
+  wireColumnDragAndDrop();
+  markTruncatedDescriptions();
+}
 
 function openInputModal(config) { modal = { type: 'input', ...config }; renderModal(); }
 function openLabelModal() {
