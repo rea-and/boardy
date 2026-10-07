@@ -18,6 +18,43 @@ const now = () => new Date().toISOString();
 const id = (prefix = 'id') => `${prefix}_${crypto.randomBytes(7).toString('hex')}`;
 const safeUser = (user) => ({ id: user.id, name: user.name, email: user.email, avatar: user.avatar });
 
+function publicShareTokenExists(store, token) {
+  return store.users.some(user => (user.data?.boards || []).some(board => board.publicShare?.token === token));
+}
+
+function publicBoardView(board) {
+  return {
+    id: board.id,
+    title: String(board.title || '').slice(0, 160),
+    description: String(board.description || '').slice(0, 2_000),
+    color: String(board.color || '#17b897').slice(0, 20),
+    background: typeof board.background === 'string' && board.background.startsWith('data:image/') ? board.background.slice(0, 6_000_000) : '',
+    lists: (Array.isArray(board.lists) ? board.lists : []).filter(list => list && typeof list === 'object').map(list => ({
+      id: list.id,
+      title: String(list.title || '').slice(0, 160),
+      cards: (Array.isArray(list.cards) ? list.cards : []).filter(card => card && typeof card === 'object').map(card => ({
+        id: card.id,
+        title: String(card.title || '').slice(0, 300),
+        description: String(card.description || '').slice(0, 20_000),
+        labels: Array.isArray(card.labels) ? card.labels.filter(label => label && typeof label === 'object').map(label => ({ name: String(label.name || '').slice(0, 80), color: String(label.color || '').slice(0, 20) })).slice(0, 30) : [],
+        due: typeof card.due === 'string' ? card.due : '',
+        checklist: Array.isArray(card.checklist) ? card.checklist.filter(item => item && typeof item === 'object').map(item => ({ text: String(item.text || '').slice(0, 300), done: Boolean(item.done) })).slice(0, 100) : [],
+        attachments: Array.isArray(card.attachments) ? card.attachments.filter(attachment => attachment && typeof attachment === 'object').map(attachment => ({ name: String(attachment.name || 'Attachment').slice(0, 160), type: String(attachment.type || '').slice(0, 100), data: typeof attachment.data === 'string' && (attachment.data.startsWith('data:image/') || attachment.data.startsWith('data:application/pdf')) ? attachment.data.slice(0, 2_500_000) : '' })).slice(0, 30) : [],
+        comments: Array.isArray(card.comments) ? card.comments.filter(comment => comment && typeof comment === 'object').map(comment => ({ author: String(comment.author || 'A Boardy user').slice(0, 100), text: String(comment.text || '').slice(0, 2_000), time: typeof comment.time === 'string' ? comment.time : '' })).slice(0, 100) : []
+      }))
+    }))
+  };
+}
+
+function findPublicBoard(store, token) {
+  if (!token || token.length < 20 || token.length > 100) return null;
+  for (const user of store.users) {
+    const board = (user.data?.boards || []).find(item => !item.archived && item.publicShare?.enabled && item.publicShare?.token === token);
+    if (board) return board;
+  }
+  return null;
+}
+
 function readStore() {
   try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')); }
   catch { return { users: [], sessions: {} }; }
@@ -116,6 +153,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
     if (url.pathname === '/api/health' && req.method === 'GET') return sendJson(res, 200, { ok: true, service: 'boardy', time: now() });
+    if (url.pathname.startsWith('/api/public-board/') && req.method === 'GET') {
+      const token = decodeURIComponent(url.pathname.slice('/api/public-board/'.length));
+      const board = findPublicBoard(store, token);
+      return board ? sendJson(res, 200, { board: publicBoardView(board) }) : sendJson(res, 404, { error: 'This public board link is no longer available.' });
+    }
     if (url.pathname === '/api/session' && req.method === 'GET') {
       const user = currentUser(req, store);
       return sendJson(res, 200, user ? { user: safeUser(user), data: user.data } : { user: null });
@@ -164,6 +206,21 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req); if (!body || !Array.isArray(body.boards)) return sendJson(res, 400, { error: 'Invalid workspace data.' });
       user.data = { boards: body.boards, theme: validThemes.has(body.theme) ? body.theme : 'dark', wallpaper: String(body.wallpaper || 'aurora').slice(0, 2_000_000), sidebarCollapsed: Boolean(body.sidebarCollapsed) }; writeStore(store);
       return sendJson(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/board-public-share' && req.method === 'POST') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
+      const body = await readBody(req);
+      const board = (user.data?.boards || []).find(item => item.id === body.boardId && !item.archived);
+      if (!board) return sendJson(res, 404, { error: 'Board not found.' });
+      if (Boolean(body.enabled)) {
+        if (!board.publicShare?.token) {
+          let token;
+          do { token = crypto.randomBytes(32).toString('base64url'); } while (publicShareTokenExists(store, token));
+          board.publicShare = { token, enabled: true, createdAt: now() };
+        } else board.publicShare = { ...board.publicShare, enabled: true };
+      } else if (board.publicShare) board.publicShare = { ...board.publicShare, enabled: false };
+      writeStore(store);
+      return sendJson(res, 200, { publicShare: board.publicShare || { enabled: false } });
     }
     if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'Not found' });
     const requested = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
