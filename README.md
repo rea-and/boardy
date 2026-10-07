@@ -1,8 +1,88 @@
 # Boardy
 
-Boardy is a self-hosted kanban workspace inspired by the best parts of Trello. It includes multiple boards, flexible lists, rich cards, labels, checklists, members, due dates, comments, attachments with image previews, search, starring, drag-and-drop movement, themes, custom wallpapers, keyboard shortcuts, portable workspace backups, and optional read-only public board links.
+### A calm, self-hosted workspace for work that moves.
+
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-1f2937?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Docker ready](https://img.shields.io/badge/Docker-ready-2563eb?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Self-hosted](https://img.shields.io/badge/hosting-self--hosted-0f766e)](https://github.com/rea-and/boardy)
+
+Boardy is a focused kanban workspace inspired by the best parts of Trello, built for people who want their work, accounts, and backups on infrastructure they control.
+
+Create boards, shape them around the way your team works, and move cards from idea to done without losing the calm, readable feel of a good workspace. Boardy works for personal planning, project delivery, recruiting pipelines, editorial calendars, product launches, and any workflow that benefits from visible progress.
+
+It runs as a small dependency-free Node.js application, is easy to deploy with Docker or systemd, and stores workspace data locally in a portable JSON file.
+
+## At a glance
+
+| Organize | Collaborate | Personalize | Operate |
+| --- | --- | --- | --- |
+| Boards, columns, rich cards, checklists, labels, search, due dates | Email invitations, read-only or editor access, public board links | Themes, wallpapers, board colors, responsive layout, keyboard shortcuts | Accounts, secure sessions, JSON backups, Docker, systemd, reverse proxies |
+
+## What makes Boardy useful
+
+- **A familiar board, with room to grow.** Reorder columns and cards with drag and drop, including cards within the same column.
+- **Cards that hold the real context.** Add descriptions, safe clickable URLs, labels with autocomplete, checklists, members, comments, due dates, stars, and attachments with previews.
+- **Sharing with clear boundaries.** Invite people by email as read-only or editors, keep ownership with the creator, and remove access whenever needed.
+- **Public when you choose.** Publish one board through a revocable read-only link without exposing an account or the rest of the workspace.
+- **A workspace that feels like yours.** Choose from light and dark themes, add wallpapers, set board colors, and use a layout that works on mobile as well as desktop.
+- **Portable and self-hosted.** Export the complete workspace to one backup file, keep persistent data on disk, and deploy on a small server without a separate database.
+
+## Feature highlights
+
+### Boards and workflow
+
+- Multiple boards per account with human-friendly routes such as `/boardy/finance`.
+- Remembered last-opened board when returning to the workspace root.
+- Custom board colors and board-specific image backgrounds.
+- Archive, restore, or permanently delete boards.
+- Board descriptions with compact previews, card search, due-soon cards, and starred-card views.
+
+### Rich card details
+
+- Titles, descriptions, clickable URLs, labels, due dates, stars, assigned members, comments, and activity.
+- Checklists with completion tracking, inline editing, reordering, and deletion.
+- Attachments with image previews and sensible size limits.
+- Duplicate, archive, and restore actions.
+- Clear save feedback so edits never feel ambiguous.
+
+### Collaboration and sharing
+
+- Owner-controlled invitations by email.
+- **Can edit** and **Read-only** member roles.
+- Visible board members and shared-board markers in the sidebar.
+- Revocable public read-only links for people without an account.
+- Public viewers can see only the selected board and cannot make changes.
+
+### Security and operations
+
+- Registration and login with salted Node.js `scrypt` password hashing.
+- Random HttpOnly session cookies.
+- Persistent local JSON storage with portable export/import.
+- Docker Compose, native Node.js, systemd, Apache, Nginx, and Caddy deployment paths.
 
 Boardy is intentionally small and dependency-free. The browser client is served by a Node.js server, and workspace data is stored on disk in a JSON file. It can run on a small Ubuntu server without a separate database.
+
+## The sharing model
+
+| Role | Access |
+| --- | --- |
+| **Owner** | Full board access, settings, invitations, permissions, member removal, and archive/delete controls. |
+| **Can edit** | Can work with board content, including cards and columns. Cannot manage access. |
+| **Read-only** | Can view the shared board without changing it. |
+| **Public viewer** | Can view one published board through its private link, without an account. |
+
+Invitations use the server’s configured sendmail-compatible program. If email delivery is not configured, Boardy keeps the invitation pending and shows the owner a secure link to copy manually.
+
+## Quick start
+
+~~~bash
+git clone https://github.com/rea-and/boardy.git
+cd boardy
+npm run check
+npm start
+~~~
+
+Open [http://localhost:4173](http://localhost:4173), create an account, and start a board. For a development workflow with automatic restarts, run `npm run dev`.
 
 ## Requirements
 
