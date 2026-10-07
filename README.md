@@ -432,6 +432,29 @@ cd /opt/boardy
 ./deploy.sh
 ~~~
 
+### Configure invitation email delivery
+
+The same script can configure Postfix to relay invitation emails through an authenticated SMTP provider. This avoids direct delivery from the server and does not require SPF or DKIM records for the server’s own IP. By default, `--setup-mail` uses Gmail SMTP on port 587; set `BOARDY_SMTP_HOST` and `BOARDY_SMTP_PORT` for another provider.
+
+Set the username and sender, then run the setup command. The script prompts for the password or app password without echoing it:
+
+~~~bash
+cd /opt/boardy
+export BOARDY_SMTP_USERNAME=your-sender@gmail.com
+export BOARDY_MAIL_FROM='Boardy <your-sender@gmail.com>'
+./deploy.sh --setup-mail
+~~~
+
+For a non-interactive deployment, also provide `BOARDY_SMTP_PASSWORD` through a protected secret mechanism. The script installs Postfix, configures TLS and authentication, stores the credential in `/etc/postfix/sasl_passwd`, creates a Boardy systemd drop-in for `BOARDY_MAIL_FROM`, restarts both services, and verifies Boardy health. It does not print the password.
+
+The regular update command remains:
+
+~~~bash
+./deploy.sh
+~~~
+
+Mail relay configuration persists across normal application updates. Use the setup command again whenever the provider, account, sender, or password changes.
+
 The deployment account needs permission to restart the service with sudo. If the service has a different name or the repository lives elsewhere, update deploy.sh or perform the equivalent commands manually:
 
 ~~~bash
