@@ -13,6 +13,11 @@ const linkify = (value = '') => esc(value).replace(urlPattern, raw => {
   const { href, trailing } = normalizeUrl(raw);
   return '<a class="text-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + href + '</a>' + trailing;
 });
+const linkifyPreview = (value = '') => esc(value).replace(urlPattern, raw => {
+  const { href, trailing } = normalizeUrl(raw);
+  const display = href.length > 48 ? href.slice(0, 45) + '…' : href;
+  return '<a class="text-link" href="' + href + '" target="_blank" rel="noopener noreferrer" title="' + href + '">' + display + '</a>' + trailing;
+});
 const isImageData = value => typeof value === 'string' && value.startsWith('data:image/');
 const uid = prefix => prefix + '_' + Math.random().toString(36).slice(2, 9);
 const initials = name => String(name || '').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'YO';
@@ -60,6 +65,8 @@ let cardSaveStatus = 'Saved';
 let saveTimer;
 let dragState = null;
 let columnDragState = null;
+let dialogModel = null;
+let dialogReturnFocus = null;
 let pendingInvitation = null;
 let pendingInvitationToken = '';
 
@@ -317,6 +324,10 @@ function renderApp() {
   const boards = state.boards.map(item => '<button class=\"board-nav' + (state.view === 'board' && item.id === board.id ? ' active' : '') + '\" data-action=\"select-board\" data-id=\"' + item.id + '\" title=\"' + esc(item.title) + '\"><i class=\"board-color board-color-button\" data-action=\"change-board-color\" data-id=\"' + item.id + '\" role=\"button\" tabindex=\"0\" aria-label=\"Change color for ' + esc(item.title) + '\" title=\"Change board color\" style=\"background:' + esc(item.color) + '\"></i><span class=\"nav-label\">' + esc(item.title) + '</span>' + (item.starred ? '<span class=\"board-star\">★</span>' : '') + '</button>').join('');
   $('#app').innerHTML = '<div class=\"app-shell ' + (state.sidebarCollapsed ? 'sidebar-collapsed' : '') + '\"><aside class=\"sidebar\" id=\"sidebar\"><div class=\"brand-row\"><div class=\"brand\"><span class=\"brand-mark\"><span></span><span></span></span><span class=\"brand-name\">Boardy</span></div><button class=\"icon-btn sidebar-collapse\" data-action=\"toggle-sidebar-collapse\" title=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\" aria-label=\"' + (state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar') + '\">' + (state.sidebarCollapsed ? '›' : '‹') + '</button></div><div class=\"workspace-label\">Workspace</div><div class=\"workspace\"><span class=\"workspace-avatar\">' + esc(initials(state.user.name)) + '</span><div><b>' + esc(state.user.name) + '\'s space</b><small>Personal workspace</small></div><span style=\"margin-left:auto;color:var(--muted-2)\">⌄</span></div><div class=\"side-section\"><div class=\"side-heading\">Views</div><button class=\"nav-item' + homeActive + '\" data-action=\"home\" title=\"All cards\"><span>◈</span> All cards</button><button class=\"nav-item' + starredActive + '\" data-action=\"starred\" title=\"Starred cards\"><span>☆</span> Starred cards</button></div><div class=\"side-section\"><div class=\"side-heading\">Your boards</div><div id=\"board-nav\">' + boards + '</div><button class=\"board-nav add-board\" data-action=\"add-board\" title=\"Create a board\"><span style=\"font-size:18px\">＋</span> Create a board</button></div><div class=\"sidebar-bottom\"><button class=\"nav-item\" data-action=\"settings\" title=\"Workspace settings\"><span>⚙</span> Workspace settings</button><div class=\"profile\"><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span><div class=\"profile-info\"><b>' + esc(state.user.name) + '</b><span>' + esc(state.user.email) + '</span></div><button class=\"icon-btn\" data-action=\"logout\" aria-label=\"Log out\" title=\"Log out\">↪</button></div></div></aside><main class=\"main-shell\"><header class=\"topbar\"><button class=\"icon-btn mobile-menu\" data-action=\"toggle-sidebar\" aria-label=\"Open navigation\">☰</button><label class=\"search\"><span>⌕</span><input id=\"search\" value=\"' + esc(state.query) + '\" placeholder=\"Search cards in this board\" /><button id=\"search-clear\" class=\"search-clear ' + (state.query ? '' : 'hidden') + '\" data-action=\"clear-search\" aria-label=\"Clear search\">×</button><kbd>⌘ K</kbd></label><div class=\"top-actions\"><button class=\"icon-btn\" data-action=\"shortcuts\" title=\"Keyboard shortcuts (?)\" aria-label=\"Keyboard shortcuts\">?</button><button class=\"icon-btn\" data-action=\"invite\" title=\"Invite people\" aria-label=\"Invite people\">♧</button><button class=\"icon-btn notification\" data-action=\"notifications\" title=\"Notifications\" aria-label=\"Notifications\">♢</button><span class=\"avatar\">' + esc(state.user.avatar || initials(state.user.name)) + '</span></div></header><section class=\"board-head\"><div class=\"board-head-main\"><div class=\"board-title-line\"><button class=\"board-color board-color-button board-color-header\" data-action=\"change-board-color\" aria-label=\"Change board color\" title=\"Change board color\" style=\"background:' + esc(board.color) + '\"></button><h1 class=\"board-title\">' + esc(board.title) + '</h1><button class=\"icon-btn star-btn ' + (board.starred ? 'active' : '') + '\" data-action=\"toggle-star\" title=\"Star board\" aria-label=\"Star board\">★</button><button class=\"icon-btn\" data-action=\"rename-board\" title=\"Rename board\" aria-label=\"Rename board\">✎</button></div><button class=\"board-subtitle board-description-button\" data-action=\"edit-board-description\">' + esc(board.description || 'Add a board description') + '</button></div><div class=\"board-actions\"><button class=\"secondary-btn\" data-action=\"share\">♧ Share</button><button class=\"primary-btn\" data-action=\"add-card-top\">＋ Add card</button></div></section><section class=\"board-content\"><div class=\"board-toolbar\"><button class=\"toolbar-btn ' + (state.onlyDue ? 'active' : '') + '\" data-action=\"due-filter\">◷ Due soon</button><button class=\"toolbar-btn ' + (state.onlyStarred ? 'active' : '') + '\" data-action=\"starred-filter\">☆ Starred</button><button class=\"toolbar-btn\" data-action=\"settings\">⚙ Board Settings</button><span class=\"board-meta\">' + allCards(board).length + ' cards · Drag to reorder</span></div><div class=\"board-scroll\"><div class=\"columns\">' + renderColumns(board) + '<button class=\"add-list\" data-action=\"add-list\">＋ Add another list</button></div></div></section></main></div><div id=\"modal-root\"></div><div class=\"toast\"></div>';
   $('.board-meta').textContent = allCards(board).length + ' cards';
+  const mobileMenu = $('[data-action="toggle-sidebar"]');
+  mobileMenu?.setAttribute('aria-controls', 'sidebar');
+  mobileMenu?.setAttribute('aria-expanded', 'false');
+  $('.sidebar-collapse')?.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
   const workspaceSettings = $('.sidebar [data-action="settings"]');
   if (workspaceSettings) { workspaceSettings.title = 'Workspace Settings'; workspaceSettings.lastChild.textContent = ' Workspace Settings'; }
   document.querySelectorAll('#board-nav .board-nav[data-id]').forEach(item => { if (state.boards.find(boardItem => boardItem.id === item.dataset.id)?.archived) item.remove(); });
@@ -334,22 +345,25 @@ function renderEmptyWorkspace() { const hasArchived = state.boards.some(board =>
 function renderColumns(board) {
   const search = state.query.toLowerCase().trim();
   const editable = canEditBoard(board);
-  return (board.lists || []).map(list => {
+  return (board.lists || []).map((list, listIndex) => {
     const cards = list.cards.filter(card => (!search || searchableCard(card).includes(search)) && (!state.onlyDue || isDueSoon(card.due)) && (!state.onlyStarred || card.starred));
     const title = editable ? '<button class="column-title" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename ' + esc(list.title) + '">' + esc(list.title) + '</button>' : '<span class="column-title-text">' + esc(list.title) + '</span>';
-    const controls = editable ? '<button class="column-drag" draggable="true" data-list="' + list.id + '" title="Drag to reorder list. When focused, use Left or Right Arrow to move it." aria-label="Reorder ' + esc(list.title) + '" aria-keyshortcuts="ArrowLeft ArrowRight">⠿</button><button class="icon-btn column-menu" data-action="rename-list" data-id="' + list.id + '" title="Rename list">···</button>' : '';
+    const controls = editable ? '<div class="column-move-controls"><button data-action="move-list-left" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' left" title="Move list left" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button><button data-action="move-list-right" data-id="' + list.id + '" aria-label="Move ' + esc(list.title) + ' right" title="Move list right" ' + (listIndex === board.lists.length - 1 ? 'disabled' : '') + '>→</button></div><button class="column-drag" draggable="true" data-list="' + list.id + '" title="Drag to reorder list. When focused, use Left or Right Arrow to move it." aria-label="Reorder ' + esc(list.title) + '" aria-keyshortcuts="ArrowLeft ArrowRight">⠿</button><button class="icon-btn column-menu" data-action="rename-list" data-id="' + list.id + '" title="Rename list" aria-label="Rename list">···</button>' : '';
     return '<section class="column" data-list="' + list.id + '"><div class="column-header"><h3>' + title + '</h3><span class="count">' + cards.length + '</span>' + controls + '</div>' + (cards.length ? cards.map(card => renderCard(card, list)).join('') : '<div class="empty"><strong>' + (search || state.onlyDue ? 'No matching cards' : 'Nothing here yet') + '</strong><span>' + (search || state.onlyDue ? 'Try another filter.' : 'Add a card to get moving.') + '</span></div>') + (editable ? '<button class="add-card" data-action="add-card" data-id="' + list.id + '">＋ Add a card</button>' : '') + '</section>';
   }).join('');
 }
 function renderCard(card, list) {
   const editable = canEditBoard();
+  const cardIndex = list.cards.findIndex(item => item.id === card.id);
+  const listIndex = currentBoard().lists.findIndex(item => item.id === list.id);
   const done = (card.checklist || []).filter(item => item.done).length;
   const total = (card.checklist || []).length;
   const people = card.members && card.members.length ? '<span class="avatar">' + esc(state.user.avatar || initials(state.user.name)) + '</span>' : '';
   const labels = card.labels && card.labels.length ? '<div class="labels">' + card.labels.map(label => '<span class="label ' + esc(label.color || '') + '">' + esc(label.name) + '</span>').join('') + '</div>' : '';
   const footer = (card.due ? '<span class="card-stat due ' + (isOverdue(card.due) ? 'overdue' : '') + '">◷ ' + formatDate(card.due) + '</span>' : '') + (total ? '<span class="card-stat progress"><span class="progress-bar"><i style="width:' + Math.round(done / total * 100) + '%"></i></span>' + done + '/' + total + '</span>' : '') + (card.attachments && card.attachments.length ? '<span class="card-stat">⌕ ' + card.attachments.length + '</span>' : '') + '<div class="avatars">' + people + '</div>';
-  const cardStar = editable ? '<button class="card-star ' + (card.starred ? 'active' : '') + '" data-action="toggle-card-star" data-id="' + card.id + '" data-list="' + list.id + '" title="Star card">★</button>' : '';
-  return '<article class="card ' + (editable ? '' : 'card-read-only') + '" ' + (editable ? 'draggable="true"' : '') + ' data-action="open-card" data-id="' + card.id + '" data-list="' + list.id + '">' + labels + '<div class="card-topline"><div class="card-title">' + esc(card.title) + '</div>' + cardStar + '</div>' + (card.description ? '<div class="card-description">' + linkify(card.description) + '</div>' : '') + '<div class="card-footer">' + footer + '</div></article>';
+  const cardStar = editable ? '<button class="card-star ' + (card.starred ? 'active' : '') + '" data-action="toggle-card-star" data-id="' + card.id + '" data-list="' + list.id + '" title="Star card" aria-label="' + (card.starred ? 'Unstar card' : 'Star card') + '">★</button>' : '';
+  const cardMoves = editable ? '<div class="card-move-controls" aria-label="Move card"><button data-action="move-card-left" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to previous list" title="Previous list" ' + (listIndex === 0 ? 'disabled' : '') + '>←</button><button data-action="move-card-up" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card up" title="Move up" ' + (cardIndex === 0 ? 'disabled' : '') + '>↑</button><button data-action="move-card-down" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card down" title="Move down" ' + (cardIndex === list.cards.length - 1 ? 'disabled' : '') + '>↓</button><button data-action="move-card-right" data-id="' + card.id + '" data-list="' + list.id + '" aria-label="Move card to next list" title="Next list" ' + (listIndex === currentBoard().lists.length - 1 ? 'disabled' : '') + '>→</button></div>' : '';
+  return '<article class="card ' + (editable ? '' : 'card-read-only') + '" ' + (editable ? 'draggable="true" tabindex="0"' : 'tabindex="0"') + ' data-action="open-card" data-id="' + card.id + '" data-list="' + list.id + '">' + labels + '<div class="card-topline"><div class="card-title">' + esc(card.title) + '</div>' + cardStar + '</div>' + (card.description ? '<div class="card-description">' + linkifyPreview(card.description) + '</div>' : '') + '<div class="card-footer">' + footer + cardMoves + '</div></article>';
 }
 function markTruncatedDescriptions(root = document) { root.querySelectorAll('.card-description').forEach(description => description.classList.toggle('is-truncated', description.scrollHeight > description.clientHeight + 1)); }
 function renderBoardOnly() { const board = currentBoard(); const columns = $('.columns'); if (columns) { columns.innerHTML = renderColumns(board) + (canEditBoard(board) ? '<button class="add-list" data-action="add-list">＋ Add another list</button>' : ''); $('.board-meta').textContent = allCards(board).length + ' cards'; wireDragAndDrop(); wireColumnDragAndDrop(); markTruncatedDescriptions(); } }
@@ -382,7 +396,6 @@ function renderInputModal() {
     submit(value);
     renderModal();
   });
-  $('#input-modal-value').focus();
 }
 function renderLabelModal() {
   const board = currentBoard();
@@ -412,7 +425,6 @@ function renderLabelModal() {
   $('#modal-root').innerHTML = '<div class="modal-layer" data-action="close-modal"><div class="modal modal--small" data-stop><div class="modal-head"><h2>Add a label</h2><button class="icon-btn close" data-action="close-modal" aria-label="Close">×</button></div><form class="modal-form" id="label-modal-form"><div class="modal-body"><div class="field"><label for="label-modal-value">Label name</label><input class="inline-input" id="label-modal-value" placeholder="e.g. Priority" autocomplete="off" required /></div><div id="label-suggestions"></div></div><div class="modal-form-footer"><button type="button" class="ghost-btn close" data-action="close-modal">Cancel</button><button type="submit" class="primary-btn">Add label</button></div></form></div></div>';
   $('#label-modal-value').addEventListener('input', event => renderSuggestions(event.target.value));
   $('#label-modal-form').addEventListener('submit', event => { event.preventDefault(); applyLabel($('#label-modal-value').value); });
-  $('#label-modal-value').focus();
   renderSuggestions('');
 }
 function openBoardColorModal(board = currentBoard()) {
@@ -604,22 +616,55 @@ function wireColumnDragAndDrop() {
 }
 function openCard(cardId, listId) { modal = { type: 'card', cardId, listId }; setCardSaveStatus('Saved'); renderModal(); }
 function selectedCard() { const board = currentBoard(); const list = board.lists.find(item => item.id === modal.listId); return { card: list && list.cards.find(item => item.id === modal.cardId), list }; }
+function finishModalRender(previousModel, focusRef) {
+  const dialog = $('#modal-root .modal');
+  if (!dialog) return;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.tabIndex = -1;
+  const heading = dialog.querySelector('.modal-head h2');
+  if (heading) {
+    if (!heading.id) heading.id = 'boardy-dialog-title';
+    dialog.setAttribute('aria-labelledby', heading.id);
+  } else if ($('#detail-title', dialog)) dialog.setAttribute('aria-label', 'Card details: ' + $('#detail-title', dialog).value);
+  if (modal !== previousModel) dialog.focus({ preventScroll: true });
+  else if (focusRef) {
+    const restored = focusRef.id ? document.getElementById(focusRef.id) : [...dialog.querySelectorAll('[data-action]')].find(item => item.dataset.action === focusRef.action && item.dataset.id === focusRef.idValue && item.dataset.index === focusRef.index);
+    restored?.focus({ preventScroll: true });
+  }
+  dialogModel = modal;
+}
 function renderModal() {
   const root = $('#modal-root');
-  if (!modal) { if (root) root.innerHTML = ''; return; }
-  if (modal.type === 'settings') return renderSettings();
-  if (modal.type === 'board-settings') return renderBoardSettings();
-  if (modal.type === 'archived-boards') return renderArchivedBoards();
-  if (modal.type === 'input') return renderInputModal();
-  if (modal.type === 'label') return renderLabelModal();
-  if (modal.type === 'board-color') return renderBoardColorModal();
-  if (modal.type === 'create-card') return renderCardCreateModal();
-  if (modal.type === 'confirm') return renderConfirmModal();
-  if (modal.type === 'share') return renderShareModal();
-  if (modal.type === 'shortcuts') return renderShortcutsModal();
+  if (!modal) {
+    if (root) root.innerHTML = '';
+    dialogModel = null;
+    const returnTarget = dialogReturnFocus;
+    dialogReturnFocus = null;
+    if (returnTarget) requestAnimationFrame(() => {
+      let target = returnTarget;
+      if (!target.isConnected && target.dataset?.action) target = [...document.querySelectorAll('[data-action]')].find(item => item.dataset.action === returnTarget.dataset.action && item.dataset.id === returnTarget.dataset.id && item.dataset.list === returnTarget.dataset.list) || null;
+      target?.isConnected && target.focus({ preventScroll: true });
+    });
+    return;
+  }
+  if (!dialogModel && !dialogReturnFocus && document.activeElement !== document.body) dialogReturnFocus = document.activeElement;
+  const previousModel = dialogModel;
+  const active = document.activeElement;
+  const focusRef = active && active.closest('#modal-root .modal') ? { id: active.id, action: active.dataset.action, idValue: active.dataset.id, index: active.dataset.index } : null;
+  if (modal.type === 'settings') { renderSettings(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'board-settings') { renderBoardSettings(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'archived-boards') { renderArchivedBoards(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'input') { renderInputModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'label') { renderLabelModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'board-color') { renderBoardColorModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'create-card') { renderCardCreateModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'confirm') { renderConfirmModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'share') { renderShareModal(); finishModalRender(previousModel, focusRef); return; }
+  if (modal.type === 'shortcuts') { renderShortcutsModal(); finishModalRender(previousModel, focusRef); return; }
   const board = currentBoard();
   const selected = selectedCard(); const card = selected.card; const list = selected.list;
-  if (!card) return;
+  if (!card) { modal = null; return renderModal(); }
   const done = (card.checklist || []).filter(item => item.done).length;
   const labels = (card.labels || []).map((label, index) => '<button class=\"label ' + esc(label.color || '') + '\" data-action=\"remove-label\" data-index=\"' + index + '\">' + esc(label.name) + ' ×</button>').join('');
   const checks = (card.checklist || []).map((item, index) => {
@@ -655,6 +700,7 @@ function renderModal() {
   $('#detail-title').addEventListener('input', event => { selectedCard().card.title = event.target.value; persist(); });
   $('#detail-description').addEventListener('input', event => { selectedCard().card.description = event.target.value; persist(); });
   $('#attachment-input')?.addEventListener('change', handleAttachments);
+  finishModalRender(previousModel, focusRef);
 }
 function renderSettings() {
   const themes = themeOptions.map(theme => '<button class=\"theme-choice ' + (state.theme === theme.id ? 'active' : '') + '\" data-action=\"set-theme\" data-theme=\"' + theme.id + '\"><strong>' + theme.name + '</strong><div class=\"theme-preview ' + theme.preview + '\"></div></button>').join('');
@@ -735,8 +781,29 @@ function handleAction(action, target) {
   const board = currentBoard();
   if (!board) return;
   if (!canManageBoard(board) && ['board-settings', 'change-board-color', 'rename-board', 'edit-board-description', 'toggle-star', 'archive-board', 'delete-board', 'share', 'invite', 'clear-board-background'].includes(action)) return notify('Only the board owner can do that');
-  if (!canEditBoard(board) && ['toggle-card-star', 'add-list', 'rename-list', 'add-card-top', 'add-card', 'toggle-check', 'add-check', 'edit-check', 'cancel-check', 'save-check', 'move-check-up', 'move-check-down', 'remove-check', 'add-label', 'remove-label', 'set-due', 'clear-due', 'add-member', 'toggle-member', 'duplicate-card', 'archive-card', 'remove-attachment', 'add-comment'].includes(action)) return;
+  if (!canEditBoard(board) && ['toggle-card-star', 'move-card-up', 'move-card-down', 'move-card-left', 'move-card-right', 'move-list-left', 'move-list-right', 'add-list', 'rename-list', 'add-card-top', 'add-card', 'toggle-check', 'add-check', 'edit-check', 'cancel-check', 'save-check', 'move-check-up', 'move-check-down', 'remove-check', 'add-label', 'remove-label', 'set-due', 'clear-due', 'add-member', 'toggle-member', 'duplicate-card', 'archive-card', 'remove-attachment', 'add-comment'].includes(action)) return;
   if (action === 'open-card') return openCard(target.dataset.id, target.dataset.list);
+  if (action.startsWith('move-card-')) {
+    const listIndex = board.lists.findIndex(list => list.id === target.dataset.list);
+    const list = board.lists[listIndex];
+    const cardIndex = list?.cards.findIndex(card => card.id === target.dataset.id) ?? -1;
+    if (cardIndex < 0) return;
+    const direction = action.slice('move-card-'.length);
+    if (direction === 'up' || direction === 'down') {
+      const neighbor = list.cards[cardIndex + (direction === 'up' ? -1 : 1)];
+      if (neighbor && moveCard(target.dataset.id, list.id, list.id, neighbor.id, direction === 'down')) notify('Card order updated');
+    } else {
+      const destination = board.lists[listIndex + (direction === 'left' ? -1 : 1)];
+      if (destination && moveCard(target.dataset.id, list.id, destination.id)) notify('Card moved to ' + destination.title);
+    }
+    return;
+  }
+  if (action === 'move-list-left' || action === 'move-list-right') {
+    const index = board.lists.findIndex(list => list.id === target.dataset.id);
+    const neighbor = board.lists[index + (action === 'move-list-left' ? -1 : 1)];
+    if (neighbor && moveList(target.dataset.id, neighbor.id, action === 'move-list-right')) notify('List order updated');
+    return;
+  }
   if (action === 'toggle-card-star') {
     const item = board.lists.flatMap(list => list.cards).find(card => card.id === target.dataset.id);
     if (item) { item.starred = !item.starred; persist(); renderBoardOnly(); }
@@ -785,13 +852,13 @@ function handleAction(action, target) {
   if (action === 'clear-board-background') { board.background = ''; persist(); applyBoardBackground(board); return renderBoardSettings(); }
   if (action === 'export-backup') return exportWorkspaceBackup();
   if (action === 'shortcuts') { modal = { type: 'shortcuts' }; return renderModal(); }
-  if (action === 'toggle-sidebar') return $('#sidebar').classList.toggle('open');
+  if (action === 'toggle-sidebar') { const sidebar = $('#sidebar'); const isOpen = sidebar.classList.toggle('open'); target.setAttribute('aria-expanded', isOpen); return; }
   if (action === 'toggle-sidebar-collapse') { state.sidebarCollapsed = !state.sidebarCollapsed; persist(); return renderApp(); }
   if (action === 'clear-search') { state.query = ''; renderApp(); $('#search').focus(); return; }
   if (action === 'select-board') { const selectedBoard = state.boards.find(item => item.id === target.dataset.id && !item.archived); if (!selectedBoard) return; state.boardId = selectedBoard.id; state.view = 'board'; state.query = ''; rememberBoard(selectedBoard); updateBoardUrl(selectedBoard); $('#sidebar')?.classList.remove('open'); return renderApp(); }
   if (action === 'change-board-color') return openBoardColorModal(state.boards.find(item => item.id === target.dataset.id) || board);
-  if (action === 'home') { state.view = 'home'; state.onlyStarred = false; state.onlyDue = false; return renderApp(); }
-  if (action === 'starred') { state.view = 'starred'; state.onlyStarred = true; state.onlyDue = false; return renderApp(); }
+  if (action === 'home') { $('#sidebar')?.classList.remove('open'); state.view = 'home'; state.onlyStarred = false; state.onlyDue = false; return renderApp(); }
+  if (action === 'starred') { $('#sidebar')?.classList.remove('open'); state.view = 'starred'; state.onlyStarred = true; state.onlyDue = false; return renderApp(); }
   if (action === 'due-filter') { state.view = 'board'; state.onlyDue = !state.onlyDue; return renderApp(); }
   if (action === 'starred-filter') { state.view = 'board'; state.onlyStarred = !state.onlyStarred; return renderApp(); }
   if (action === 'add-board') return openInputModal({ heading: 'Create a board', label: 'Board name', placeholder: 'e.g. Product launch', submitLabel: 'Create board', onSubmit: title => {
@@ -887,13 +954,26 @@ document.addEventListener('click', event => {
   const target = event.target.closest('[data-action]');
   if (!target) return;
   if (target.dataset.action === 'close-modal' && event.target.closest('[data-stop]') && !event.target.classList.contains('close')) return;
+  if (window.innerWidth <= 900 && sidebar?.classList.contains('open') && target.closest('#sidebar') && target.dataset.action !== 'toggle-sidebar') { sidebar.classList.remove('open'); $('[data-action="toggle-sidebar"]')?.setAttribute('aria-expanded', 'false'); }
+  if (!modal && ['open-card', 'settings', 'board-settings', 'archived-boards', 'add-board', 'change-board-color', 'rename-board', 'edit-board-description', 'add-list', 'rename-list', 'add-card-top', 'add-card', 'share', 'invite', 'shortcuts', 'delete-board'].includes(target.dataset.action)) dialogReturnFocus = target;
   handleAction(target.dataset.action, target);
 });
-document.addEventListener('click', event => { if (event.target.matches('.modal-layer')) dismissModal(); });
 document.addEventListener('keydown', event => {
+  if (modal && event.key === 'Tab') {
+    const dialog = $('#modal-root .modal');
+    const focusable = dialog ? [...dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(item => item.getClientRects().length) : [];
+    if (!focusable.length) { event.preventDefault(); dialog?.focus(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!dialog?.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
   if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-action="change-board-color"]')) { event.preventDefault(); handleAction('change-board-color', event.target); return; }
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.card[data-action="open-card"]')) { event.preventDefault(); openCard(event.target.dataset.id, event.target.dataset.list); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search') && $('#search').focus(); }
   if (event.key === 'Escape' && modal) dismissModal();
+  else if (event.key === 'Escape' && $('#sidebar')?.classList.contains('open')) { $('#sidebar').classList.remove('open'); $('[data-action="toggle-sidebar"]')?.setAttribute('aria-expanded', 'false'); $('[data-action="toggle-sidebar"]')?.focus(); }
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && modal && modal.type === 'card' && document.activeElement === $('#comment-input')) {
     event.preventDefault();
     handleAction('add-comment', $('#comment-input'));
