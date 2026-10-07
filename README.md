@@ -15,6 +15,12 @@ Docker users need Docker Engine and the Docker Compose plugin instead of a host 
 
 Boardy listens on port 4173 by default.
 
+## Member invitations
+
+Open a board and choose **Share** to invite someone by email. Select **Read-only** or **Can edit** before sending. The owner can change that permission or remove access later. Accepted members appear in the board header and Share dialog; shared boards are marked in each member’s sidebar.
+
+Invitation links use the configured public Boardy URL. Set `BOARDY_PUBLIC_URL` to the complete externally reachable app URL, including a reverse-proxy subpath when you use one, for example `https://boardy.example.com` or `https://example.com/boardy`. Boardy sends mail through a local sendmail-compatible binary, `/usr/sbin/sendmail` by default. Install and configure an MTA such as Postfix, or set `BOARDY_SENDMAIL_PATH` to the approved sendmail-compatible delivery command. If mail is not configured, Boardy keeps the invitation pending and shows the owner a secure link to copy manually.
+
 ## Public board links
 
 Open a board and choose **Share**, then enable **Allow public viewing**. Boardy creates a revocable, read-only link for that board. Anyone with the link can view the selected board without an account, including its lists, cards, descriptions, checklists, comments, labels, and supported image previews. Visitors cannot edit the board, open your workspace, or see any other board or account information.
@@ -228,6 +234,9 @@ Boardy accepts these environment variables:
 | PORT | 4173 | HTTP port used by Boardy. |
 | BOARDY_DATA_DIR | ./data | Directory containing the persistent boardy.json store. |
 | NODE_ENV | unset | Set to production to add the Secure cookie attribute. |
+| BOARDY_PUBLIC_URL | derived from the request | Complete public app URL used in invitation emails. Include the `/boardy` subpath when applicable. |
+| BOARDY_MAIL_FROM | `Boardy <boardy@localhost>` | From header used for invitation emails. |
+| BOARDY_SENDMAIL_PATH | `/usr/sbin/sendmail` | Sendmail-compatible executable used for invitation delivery. |
 
 Example:
 
