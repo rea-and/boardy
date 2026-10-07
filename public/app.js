@@ -186,7 +186,7 @@ function applySession(result) {
   const selected = routeBoard || boards.find(board => !board.archived && board.id === remembered) || boards.find(board => !board.archived) || boards[0];
   state = { ...state, ...result.data, boards, user: result.user, boardId: selected?.id || null };
   if (selected && !selected.archived) rememberBoard(selected);
-  if (routeBoardSlug() && !routeBoard && selected && !selected.archived) updateBoardUrl(selected, true);
+  if (selected && !selected.archived && routeBoardSlug() !== boardSlug(selected)) updateBoardUrl(selected, true);
   setPreferences();
   renderApp();
   if (slugsChanged) persist();
