@@ -108,6 +108,9 @@ function sendInvitationEmail(to, ownerName, boardTitle, invitationUrl) {
     return Promise.resolve(false);
   }
   const from = clean(process.env.BOARDY_MAIL_FROM || `Boardy <boardy@${reqHostName()}>`);
+  const fromAddress = (from.match(/<([^<>@\s]+@[^<>@\s]+)>/) || from.match(/\b[^<>@\s]+@[^<>@\s]+\b/) || [])[1] || '';
+  const sendmailArgs = ['-t', '-i'];
+  if (fromAddress) sendmailArgs.push('-f', fromAddress);
   const subject = `${clean(ownerName)} invited you to join ${clean(boardTitle)} on Boardy`;
   const message = [
     `From: ${from}`,
@@ -127,7 +130,7 @@ function sendInvitationEmail(to, ownerName, boardTitle, invitationUrl) {
   ].join('\r\n');
   console.info(`Boardy invitation email: sending via ${sendmailPath} to ${maskEmail(to)}`);
   return new Promise(resolve => {
-    const child = spawn(sendmailPath, ['-t', '-i'], { stdio: ['pipe', 'ignore', 'pipe'] });
+    const child = spawn(sendmailPath, sendmailArgs, { stdio: ['pipe', 'ignore', 'pipe'] });
     let errorOutput = '';
     let settled = false;
     const timer = setTimeout(() => {
