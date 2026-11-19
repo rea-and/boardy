@@ -383,6 +383,35 @@ const server = http.createServer(async (req, res) => {
       writeStore(store);
       return sendJson(res, 200, { ok: true });
     }
+    if (url.pathname === '/api/cards' && req.method === 'POST') {
+      const user = currentUser(req, store);
+      if (!user) return sendJson(res, 401, { error: 'Please sign in to Boardy in your browser first.' });
+      const body = await readBody(req);
+      const boardId = String(body.boardId || '');
+      const listId = String(body.listId || '');
+      const title = String(body.title || '').trim().slice(0, 300);
+      const pageUrl = String(body.url || '').trim().slice(0, 4_000);
+      if (!boardId || !listId || !title || !pageUrl) return sendJson(res, 400, { error: 'A board, column, card title, and page URL are required.' });
+      let board = findOwnedBoard(user, boardId);
+      if (!board) {
+        const membership = membershipsFor(user).find(item => item.boardId === boardId);
+        if (!membership) return sendJson(res, 404, { error: 'Board not found or you do not have access.' });
+        if (normalizeRole(membership.role) !== 'editor') return sendJson(res, 403, { error: 'You have read-only access to this board.' });
+        const owner = store.users.find(candidate => candidate.id === membership.ownerId);
+        board = owner && findOwnedBoard(owner, boardId);
+        if (!board) return sendJson(res, 404, { error: 'Board not found or you do not have access.' });
+      }
+      const list = (board.lists || []).find(item => item.id === listId);
+      if (!list) return sendJson(res, 404, { error: 'Column not found on this board.' });
+      let parsedUrl;
+      try { parsedUrl = new URL(pageUrl); } catch {}
+      if (!parsedUrl || !['http:', 'https:'].includes(parsedUrl.protocol)) return sendJson(res, 400, { error: 'Only http and https page URLs can be added.' });
+      const card = { id: id('card'), title, description: pageUrl, labels: [], due: '', checklist: [], attachments: [], members: [], comments: [] };
+      if (!Array.isArray(list.cards)) list.cards = [];
+      list.cards.push(card);
+      writeStore(store);
+      return sendJson(res, 201, { card: { id: card.id, title: card.title } });
+    }
     if (url.pathname === '/api/board-invitations' && req.method === 'GET') {
       const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
       const board = findOwnedBoard(user, url.searchParams.get('boardId') || '');

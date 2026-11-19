@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add a card to Boardy</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="4" width="4.5" height="16" rx="1.5" />
+        <rect x="9.75" y="4" width="4.5" height="11" rx="1.5" />
+        <rect x="16" y="4" width="4.5" height="7" rx="1.5" />
+      </svg>
+      <span>Boardy</span>
+    </div>
+    <span id="statusBadge" class="status-badge">Checking...</span>
+  </div>
+
+  <div class="content">
+    <!-- Preview Box -->
+    <div class="card-preview" aria-label="Current page preview">
+      <img id="coverImg" class="cover-thumb" alt="" />
+      <div class="meta-box">
+        <div class="domain-row">
+          <img id="faviconImg" class="domain-favicon" alt="" />
+          <span id="domainLabel" class="domain-name">Loading...</span>
+        </div>
+        <div id="pageTitle" class="page-title">Loading current tab…</div>
+      </div>
+    </div>
+
+    <!-- Card Form -->
+    <form id="card-form" hidden>
+      <!-- Board & Column in row-split -->
+      <div class="row-split">
+        <div>
+          <label for="board-select">Board</label>
+          <select id="board-select" required></select>
+        </div>
+        <div>
+          <label for="list-select">Column</label>
+          <select id="list-select" required></select>
+        </div>
+      </div>
+
+      <!-- Card Title -->
+      <div>
+        <label for="card-title">Card title</label>
+        <input id="card-title" type="text" maxlength="300" placeholder="Page title" required>
+      </div>
+
+      <!-- Include URL note -->
+      <div class="include-url">
+        <span class="check-icon" aria-hidden="true">↗</span>
+        <span>Page URL will be added to the card description.</span>
+      </div>
+    </form>
+
+    <!-- Message / Notification Banner -->
+    <div class="message" id="message" role="status" aria-live="polite" hidden></div>
+  </div>
+
+  <!-- Footer Actions -->
+  <div class="footer">
+    <a id="toggleSettings" class="settings-link" role="button" tabindex="0">⚙ Server Settings</a>
+    <button type="submit" form="card-form" id="add-button" class="btn btn-primary" hidden>Add card</button>
+  </div>
+
+  <!-- Settings Expandable -->
+  <div id="settingsPanel">
+    <form id="connect-form">
+      <label for="boardy-url">Boardy Server API URL</label>
+      <input id="boardy-url" type="url" placeholder="https://boardy.example.com/boardy/" autocomplete="url" required style="margin-bottom: 6px;">
+      <p class="hint">Use your Boardy home address, including any path such as <code>/boardy/</code>.</p>
+      <button class="btn btn-primary" type="submit" style="width: 100%;">Connect &amp; Save</button>
+      <button class="text-button" type="button" id="open-boardy" hidden>Open Boardy in browser to sign in</button>
+    </form>
+    <div class="disclaimer">Uses your existing Boardy sign-in. Your password is never stored here.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

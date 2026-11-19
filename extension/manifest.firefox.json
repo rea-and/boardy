@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Boardy — Quick Add",
+  "version": "1.0.0",
+  "description": "Quickly save the current page as a card on a Boardy board.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "boardy-quick-add@boardy.app",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": ["activeTab", "storage", "scripting"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": { "default_title": "Add a card to Boardy", "default_popup": "popup.html" }
+}

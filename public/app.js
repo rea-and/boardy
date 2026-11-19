@@ -1058,6 +1058,12 @@ document.addEventListener('keydown', event => {
   }
   if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-action="change-board-color"]')) { event.preventDefault(); handleAction('change-board-color', event.target); return; }
   if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.card[data-action="open-card"]')) { event.preventDefault(); openCard(event.target.dataset.id, event.target.dataset.list); return; }
+  if (event.key === 'Enter' && !event.isComposing && !event.shiftKey && modal && modal.type === 'card' && event.target.id === 'check-item') {
+    event.preventDefault();
+    handleAction('add-check', event.target);
+    requestAnimationFrame(() => $('#check-item')?.focus());
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search') && $('#search').focus(); }
   if (event.key === 'Escape' && modal) dismissModal();
   else if (event.key === 'Escape' && $('#sidebar')?.classList.contains('open')) { $('#sidebar').classList.remove('open'); $('[data-action="toggle-sidebar"]')?.setAttribute('aria-expanded', 'false'); $('[data-action="toggle-sidebar"]')?.focus(); }

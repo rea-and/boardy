@@ -26,6 +26,7 @@ It runs as a small dependency-free Node.js application, is easy to deploy with D
 - **Public when you choose.** Publish one board through a revocable read-only link without exposing an account or the rest of the workspace.
 - **A workspace that feels like yours.** Choose from light and dark themes, add wallpapers, set board colors, and use a layout that works on mobile as well as desktop.
 - **Portable and self-hosted.** Export the complete workspace to one backup file, keep persistent data on disk, and deploy on a small server without a separate database.
+- **Capture from your browser.** Optional Chrome and Firefox extensions turn the current page into a card on a board and column you choose, with the page URL saved in its description.
 
 ## Feature highlights
 
@@ -61,6 +62,29 @@ It runs as a small dependency-free Node.js application, is easy to deploy with D
 - Docker Compose, native Node.js, systemd, Apache, Nginx, and Caddy deployment paths.
 
 Boardy is intentionally small and dependency-free. The browser client is served by a Node.js server, and workspace data is stored on disk in a JSON file. It can run on a small Ubuntu server without a separate database.
+
+## Browser extension: Chrome and Firefox
+
+The Boardy Quick Add extension saves the current web page as a card without copying its URL by hand. Choose a board and column, edit the suggested card title if needed, and add the card. The full page URL is stored in the card description. Boards shared with you are available when you have editor access; read-only boards cannot be selected.
+
+The extension uses the existing Boardy sign-in in your browser. It does not ask for or store your password. To keep access narrow, it asks for permission only for the Boardy site address you enter. If you are not signed in yet, open Boardy in a regular tab, sign in, and then use Quick Add again. Pages with browser-internal addresses (such as `chrome://`) cannot be captured.
+
+### Build and install for local testing
+
+Run these commands from the Boardy repository on a computer with Node.js:
+
+~~~bash
+npm run build:extension
+~~~
+
+This creates `extension/dist/chrome` and `extension/dist/firefox`; no npm packages need to be installed.
+
+- **Chrome:** open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `extension/dist/chrome`.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on…**, and select `extension/dist/firefox/manifest.json`. Temporary add-ons are removed when Firefox restarts. For permanent installation, the extension must be signed and distributed through Mozilla Add-ons or an organization’s approved deployment method.
+
+Pin **Boardy — Quick Add** to the browser toolbar. On first use, enter your Boardy home address (including a reverse-proxy path, for example `https://boardy.example.com/boardy/`) and approve access to that site. Your current page title is suggested as the card title. Choose a board and column, then select **Add card**. The extension remembers the Boardy address and last-used board/column on that browser profile. Those preferences stay in the extension’s local storage.
+
+The extension calls a dedicated authenticated card-creation endpoint. The server checks that you own the selected board or have editor access, validates the destination column and URL, and creates only that card. It does not expose other boards or bypass read-only sharing.
 
 ## The sharing model
 
