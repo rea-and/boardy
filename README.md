@@ -606,17 +606,41 @@ Common issues:
 
 - Account registration, login, logout, and password hashing with Node.js scrypt.
 - Multiple boards, lists, and cards.
-- Card descriptions, labels, due dates, checklists, members, comments, attachments, previews, starring, duplication, and archiving.
+- Card descriptions, labels, due dates, checklists, members, comments, attachments, previews, starring, duplication, and deletion with a short Undo window.
 - Drag-and-drop card movement and list reordering.
 - Search and due/starred filters.
 - Themes, custom wallpapers, responsive layout, and a collapsible sidebar.
 - Keyboard shortcuts.
 - JSON export/import workspace backups.
-- Automatic persistence through the authenticated /api/data endpoint.
+- Automatic persistence through the authenticated /api/data endpoint, with per-board revisions so a stale browser tab can never overwrite newer changes made in another tab, by a collaborator, or by the browser extension.
+
+## How saving and conflicts work
+
+- The browser saves the whole workspace to PUT /api/data about 350 ms after each change, flushes pending changes when the tab is hidden or closed, and retries failed saves up to three times.
+- Every board has an integer revision (`rev`). The server increments it whenever the board's content changes, including cards added by the browser extension through POST /api/cards.
+- If a tab saves a board based on an older revision, the server keeps the stored board and reports a conflict. The tab then reloads the workspace and shows "Boardy loaded newer changes made elsewhere". Tabs also check GET /api/revisions when they regain focus, so clipped cards appear without a manual refresh.
+- Boards are only removed when the client lists them in `deletedBoardIds`; a board that is merely missing from a stale payload is kept.
+- Requests larger than about 8 MB are rejected with a clear message. The app refuses attachments, wallpapers and board images that would push the workspace over roughly 7.5 MB.
+- The server reads boardy.json once at startup and keeps it in memory. Stop Boardy before editing or restoring the file by hand, then start it again.
+
+## Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `?` | Show shortcuts |
+| `/` or `⌘/Ctrl K` | Focus card search (Esc clears it) |
+| `N` | Create a card (editors and owners) |
+| `L` | Create a list (editors and owners) |
+| `S` | Open workspace settings |
+| `Esc` | Close the current dialog |
+| `⌘/Ctrl Enter` | Post a card comment |
+| `Enter` / `Esc` in a checklist field | Add or save the item / cancel the edit |
 
 ## Security notes
 
 - Always use HTTPS for public deployments.
+- Behind a reverse proxy, set `BOARDY_TRUST_PROXY=1` so sign-in rate limiting applies per client instead of to the proxy's single address.
+- User-controlled values (titles, ids, colors, attachment data) are escaped or validated before they reach the DOM, including data saved by shared-board editors.
 - Keep boardy.json and its containing data directory outside any web root.
 - Run the service as a dedicated non-root operating-system account.
 - Keep backup files private.

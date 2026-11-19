@@ -37,6 +37,18 @@ The default local URL is http://localhost:4173.
 - Maintain keyboard access, visible focus states, usable contrast, and responsive behavior.
 - Do not replace the working product surface with a landing page or a placeholder screen.
 
+## Architecture and persistence rules
+
+- server/index.js keeps the whole store in memory (`store`, loaded once at startup). Handlers must mutate it synchronously after `await readBody()` and then call `writeStore()`. Never re-read the file per request.
+- Every board has an integer `rev`. Bump it in any code path that changes a board (`mergeIncomingBoard`, `POST /api/cards`). `PUT /api/data` returns `{ ok, revs, conflicts }`; a client with an older `rev` loses and must reload.
+- Boards are deleted only through `deletedBoardIds` in the PUT payload, never by omission.
+- `publicShare` and board `members` are server-owned and are never taken from client payloads.
+- Client saves go through `persist()` / `runSave()` in public/app.js. Do not call `PUT /api/data` directly. `refreshWorkspace()` reloads after conflicts and on tab focus.
+- Request bodies are capped at 8 MB (413). Keep the client-side `workspaceFits()` guard in front of anything that adds attachments or images.
+- Escape every interpolated value with `esc()`, including ids; pass colors through `safePublicColor()`; only render `data:image/` URLs in `<img>`.
+- Destructive card and checklist actions use `notify(message, { actionLabel, onAction })` for Undo instead of a confirm dialog. Board deletion and backup import keep their confirm dialogs.
+- Dialogs opened from the card dialog must keep `previousModal` so closing them returns to the card (`openInputModal` does this).
+
 ## Data and security
 
 - Passwords are salted and hashed with Node scrypt.
@@ -46,11 +58,20 @@ The default local URL is http://localhost:4173.
 - Back up the Docker boardy-data volume or the configured BOARDY_DATA_DIR before upgrades.
 - The built-in file store is appropriate for a small self-hosted installation. A larger deployment should move persistence to a transactional database and object storage.
 
+## Git and commits
+
+- Commits are authored by Andrea only. Never add `Co-Authored-By`, "Generated with Claude Code", or any other AI attribution to commit messages or pull request descriptions.
+- Always commit as Andrea Carlevato <andrea.carlevato@gmail.com> (already set in git config; do not change it). Commit only when asked, and never commit data/boardy.json.
+
+## Project skills
+
+Task recipes live in .claude/skills: `boardy-verify` (check, API smoke test, real-browser UI checks) and `boardy-deploy` (update and restart a server).
+
 ## Verification checklist
 
 Before handing off changes:
 
-1. Run npm run check.
+1. Run npm run check and npm run test:api.
 2. Start the server and verify GET /api/health.
 3. Verify the unauthenticated login/register surface.
 4. Verify the demo workspace, card details, settings, and persistence after reload.
