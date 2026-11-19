@@ -522,3 +522,73 @@
     max-height: 24dvh;
   }
 }
+
+/* Long unbroken words (URLs) wrap inside cards instead of overflowing them. */
+.card-title,
+.public-card h3 {
+  overflow-wrap: anywhere;
+}
+
+/* Checklist items wrap so their full text stays readable. */
+.checklist-check {
+  align-items: flex-start;
+}
+
+.checklist-check input {
+  margin-top: 2px;
+}
+
+.checklist-check span {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.card-footer .avatars .avatar-more {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+.attachment-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.attachment-link:hover span,
+.attachment-link:focus-visible span {
+  color: var(--ink);
+}
+
+.attachment .attachment-icon {
+  display: grid;
+  place-items: center;
+  height: 85px;
+  padding: 0;
+  font-size: 26px;
+  color: var(--muted-2);
+}
+
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+.toast-action {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 9px;
+  background: rgba(23, 184, 151, .2);
+  color: #8be5cd;
+  font: inherit;
+  font-weight: 700;
+}
+
+.toast-action:hover,
+.toast-action:focus-visible {
+  background: rgba(23, 184, 151, .35);
+  color: #fff;
+}

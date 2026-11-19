@@ -206,10 +206,43 @@ function readStore() {
   try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')); }
   catch { return { users: [], sessions: {} }; }
 }
-function writeStore(store) {
+function writeStore(target = store) {
   const temp = `${dataFile}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(store, null, 2));
+  fs.writeFileSync(temp, JSON.stringify(target, null, 2));
   fs.renameSync(temp, dataFile);
+}
+// The store is read once and kept in memory. Handlers mutate it synchronously after their
+// request body has been read, so overlapping requests no longer overwrite each other with
+// stale snapshots taken before an await.
+const store = readStore();
+
+const boardRev = board => Number.isInteger(board?.rev) ? board.rev : 0;
+function boardContent(board) {
+  const { rev, ...content } = board;
+  return JSON.stringify(content);
+}
+// Applies a client's copy of a board on top of the stored one. Public sharing and membership
+// are server-owned, so they always come from the stored board. A client saving a board based
+// on an older revision gets a conflict and the stored board is kept.
+function mergeIncomingBoard(stored, incoming, conflicts) {
+  const updated = stripClientBoard(incoming);
+  delete updated.rev;
+  if (stored.publicShare) updated.publicShare = stored.publicShare; else delete updated.publicShare;
+  if (Array.isArray(stored.members)) updated.members = stored.members;
+  if (JSON.stringify(updated) === boardContent(stored)) return stored;
+  const incomingRev = Number.isInteger(incoming.rev) ? incoming.rev : 0;
+  if (incomingRev < boardRev(stored)) { conflicts.push(stored.id); return stored; }
+  return { ...updated, rev: boardRev(stored) + 1 };
+}
+function workspaceRevisions(user) {
+  const revs = {};
+  for (const board of user.data?.boards || []) revs[board.id] = boardRev(board);
+  for (const membership of membershipsFor(user)) {
+    const owner = store.users.find(candidate => candidate.id === membership.ownerId);
+    const board = owner && findOwnedBoard(owner, membership.boardId);
+    if (board) revs[board.id] = boardRev(board);
+  }
+  return revs;
 }
 function seedBoard(name = 'My workspace') {
   const due = new Date(Date.now() + 1000 * 60 * 60 * 24 * 4).toISOString();
@@ -259,13 +292,38 @@ function sendJson(res, status, body, extraHeaders = {}) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extraHeaders });
   res.end(payload);
 }
+const maxBodyBytes = 8_000_000;
+function httpError(status, message) { return Object.assign(new Error(message), { status }); }
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let raw = '';
-    req.on('data', chunk => { raw += chunk; if (raw.length > 8_000_000) reject(new Error('Payload too large')); });
-    req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('Invalid JSON')); } });
+    const chunks = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > maxBodyBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        reject(httpError(413, 'This workspace is too large to save. Remove some attachments or images and try again.'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (tooLarge) return;
+      try { const raw = Buffer.concat(chunks).toString('utf8'); resolve(raw ? JSON.parse(raw) : {}); }
+      catch { reject(httpError(400, 'The request was not valid JSON.')); }
+    });
     req.on('error', reject);
   });
+}
+function clientAddress(req) {
+  if (process.env.BOARDY_TRUST_PROXY === '1') {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress || 'unknown';
 }
 function sessionCookie(token, maxAge = 60 * 60 * 24 * 14) {
   return `boardy_session=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`;
@@ -296,8 +354,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('x-frame-options', 'SAMEORIGIN');
   res.setHeader('referrer-policy', 'same-origin');
   res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()');
-  const store = readStore();
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const address = clientAddress(req);
   try {
     if (url.pathname === '/api/health' && req.method === 'GET') return sendJson(res, 200, { ok: true, service: 'boardy', time: now() });
     if (url.pathname.startsWith('/api/public-board/') && req.method === 'GET') {
@@ -316,32 +374,32 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, user ? { user: safeUser(user), data: workspaceData(store, user) } : { user: null });
     }
     if (url.pathname === '/api/register' && req.method === 'POST') {
-      if (authBlocked(req.socket.remoteAddress || 'unknown')) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
+      if (authBlocked(address)) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
       const body = await readBody(req);
       const name = String(body.name || '').trim().slice(0, 80);
       const email = String(body.email || '').trim().toLowerCase().slice(0, 160);
       const password = String(body.password || '');
-      if (name.length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) { recordAuthFailure(req.socket.remoteAddress || 'unknown'); return sendJson(res, 400, { error: 'Use a name, a valid email, and a password of at least 8 characters.' }); }
-      if (store.users.some(user => user.email === email)) { recordAuthFailure(req.socket.remoteAddress || 'unknown'); return sendJson(res, 409, { error: 'That email is already registered.' }); }
+      if (name.length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) { recordAuthFailure(address); return sendJson(res, 400, { error: 'Use a name, a valid email, and a password of at least 8 characters.' }); }
+      if (store.users.some(user => user.email === email)) { recordAuthFailure(address); return sendJson(res, 409, { error: 'That email is already registered.' }); }
       const credentials = hashPassword(password);
       const user = { id: id('user'), name, email, avatar: name.split(/\s+/).map(x => x[0]).join('').slice(0, 2).toUpperCase(), passwordSalt: credentials.salt, passwordHash: credentials.hash, data: { boards: [seedBoard(`${name.split(' ')[0]}'s workspace`)], theme: 'dark', wallpaper: 'aurora', sidebarCollapsed: false }, createdAt: now() };
       store.users.push(user);
       const token = crypto.randomBytes(32).toString('hex');
       store.sessions[token] = { userId: user.id, expires: Date.now() + 1000 * 60 * 60 * 24 * 14 };
       writeStore(store);
-      clearAuthFailures(req.socket.remoteAddress || 'unknown');
+      clearAuthFailures(address);
       return sendJson(res, 201, { user: safeUser(user), data: workspaceData(store, user) }, { 'set-cookie': sessionCookie(token) });
     }
     if (url.pathname === '/api/login' && req.method === 'POST') {
-      if (authBlocked(req.socket.remoteAddress || 'unknown')) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
+      if (authBlocked(address)) return sendJson(res, 429, { error: 'Too many authentication attempts. Try again in a few minutes.' });
       const body = await readBody(req);
       const email = String(body.email || '').trim().toLowerCase();
       const user = store.users.find(item => item.email === email);
-      if (!user || !passwordMatches(String(body.password || ''), user)) { recordAuthFailure(req.socket.remoteAddress || 'unknown'); return sendJson(res, 401, { error: 'Email or password is incorrect.' }); }
+      if (!user || !passwordMatches(String(body.password || ''), user)) { recordAuthFailure(address); return sendJson(res, 401, { error: 'Email or password is incorrect.' }); }
       const token = crypto.randomBytes(32).toString('hex');
       store.sessions[token] = { userId: user.id, expires: Date.now() + 1000 * 60 * 60 * 24 * 14 };
       writeStore(store);
-      clearAuthFailures(req.socket.remoteAddress || 'unknown');
+      clearAuthFailures(address);
       return sendJson(res, 200, { user: safeUser(user), data: workspaceData(store, user) }, { 'set-cookie': sessionCookie(token) });
     }
     if (url.pathname === '/api/demo' && req.method === 'POST') {
@@ -362,26 +420,46 @@ const server = http.createServer(async (req, res) => {
       const memberships = membershipsFor(user);
       const membershipByBoard = new Map(memberships.map(membership => [membership.boardId, membership]));
       const knownBoardIds = new Set(store.users.flatMap(candidate => (candidate.data?.boards || []).map(board => board.id)));
+      // Boards are only removed when the client says so explicitly. A board missing from a
+      // stale tab's payload (for example one created in another tab) is kept.
+      const deletedBoardIds = new Set(Array.isArray(body.deletedBoardIds) ? body.deletedBoardIds.map(String) : []);
       const nextOwned = [];
+      const seenOwned = new Set();
+      const revs = {};
+      const conflicts = [];
       for (const incoming of body.boards) {
-        if (!incoming || typeof incoming !== 'object' || !incoming.id) continue;
+        if (!incoming || typeof incoming !== 'object' || typeof incoming.id !== 'string' || !incoming.id) continue;
         const membership = membershipByBoard.get(incoming.id);
         if (membership) {
           if (normalizeRole(membership.role) !== 'editor') continue;
           const owner = store.users.find(candidate => candidate.id === membership.ownerId);
           const ownerBoard = owner && (owner.data?.boards || []).find(board => board.id === membership.boardId);
           if (!ownerBoard) continue;
-          const updated = stripClientBoard(incoming);
-          if (ownerBoard.publicShare && !updated.publicShare) updated.publicShare = ownerBoard.publicShare;
-          owner.data.boards = (owner.data.boards || []).map(board => board.id === ownerBoard.id ? updated : board);
+          const merged = mergeIncomingBoard(ownerBoard, incoming, conflicts);
+          if (merged !== ownerBoard) owner.data.boards = (owner.data.boards || []).map(board => board.id === ownerBoard.id ? merged : board);
+          revs[merged.id] = boardRev(merged);
           continue;
         }
         if (!ownedIds.has(incoming.id) && knownBoardIds.has(incoming.id)) continue;
-        nextOwned.push(stripClientBoard(incoming));
+        if (seenOwned.has(incoming.id)) continue;
+        seenOwned.add(incoming.id);
+        const existing = existingOwned.find(board => board.id === incoming.id);
+        const merged = existing ? mergeIncomingBoard(existing, incoming, conflicts) : { ...stripClientBoard(incoming), rev: 1 };
+        nextOwned.push(merged);
+        revs[merged.id] = boardRev(merged);
+      }
+      for (const existing of existingOwned) {
+        if (seenOwned.has(existing.id) || deletedBoardIds.has(existing.id)) continue;
+        nextOwned.push(existing);
+        conflicts.push(existing.id);
       }
       user.data = { ...user.data, boards: nextOwned, memberships, theme: validThemes.has(body.theme) ? body.theme : 'dark', wallpaper: String(body.wallpaper || 'aurora').slice(0, 2_000_000), sidebarCollapsed: Boolean(body.sidebarCollapsed) };
       writeStore(store);
-      return sendJson(res, 200, { ok: true });
+      return sendJson(res, 200, { ok: true, revs, conflicts });
+    }
+    if (url.pathname === '/api/revisions' && req.method === 'GET') {
+      const user = currentUser(req, store); if (!user) return sendJson(res, 401, { error: 'Please sign in again.' });
+      return sendJson(res, 200, { revs: workspaceRevisions(user) });
     }
     if (url.pathname === '/api/cards' && req.method === 'POST') {
       const user = currentUser(req, store);
@@ -409,6 +487,7 @@ const server = http.createServer(async (req, res) => {
       const card = { id: id('card'), title, description: pageUrl, labels: [], due: '', checklist: [], attachments: [], members: [], comments: [] };
       if (!Array.isArray(list.cards)) list.cards = [];
       list.cards.push(card);
+      board.rev = boardRev(board) + 1;
       writeStore(store);
       return sendJson(res, 201, { card: { id: card.id, title: card.title } });
     }
@@ -497,13 +576,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { publicShare: board.publicShare || { enabled: false } });
     }
     if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'Not found' });
-    const requested = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+    let requested;
+    try { requested = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname); }
+    catch { return sendJson(res, 400, { error: 'Bad request' }); }
     const safePath = path.normalize(path.join(publicDir, requested));
-    if (!safePath.startsWith(publicDir)) return sendJson(res, 403, { error: 'Forbidden' });
+    if (!safePath.startsWith(publicDir + path.sep)) return sendJson(res, 403, { error: 'Forbidden' });
     const ext = path.extname(safePath); const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
     if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) { res.writeHead(200, { 'content-type': `${types[ext] || 'application/octet-stream'}; charset=utf-8` }); return fs.createReadStream(safePath).pipe(res); }
     return respondApp(res);
-  } catch (error) { console.error(error); return sendJson(res, 500, { error: 'Something went wrong. Please try again.' }); }
+  } catch (error) {
+    if (error.status === 400 || error.status === 413) return sendJson(res, error.status, { error: error.message }, error.status === 413 ? { connection: 'close' } : {});
+    console.error(error);
+    return sendJson(res, 500, { error: 'Something went wrong. Please try again.' });
+  }
 });
 
 server.listen(port, () => console.log(`Boardy listening on http://localhost:${port}`));

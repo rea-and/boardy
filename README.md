@@ -336,7 +336,8 @@ Boardy accepts these environment variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | PORT | 4173 | HTTP port used by Boardy. |
-| BOARDY_DATA_DIR | ./data | Directory containing the persistent boardy.json store. |
+| BOARDY_DATA_DIR | ./data | Directory containing the persistent boardy.json store. The server reads it once at startup and keeps it in memory, so stop Boardy before editing or restoring the file by hand. |
+| BOARDY_TRUST_PROXY | unset | Set to `1` when Boardy runs behind a reverse proxy (nginx, Caddy) that sets `X-Forwarded-For`. Sign-in rate limiting then applies per client instead of to the proxy's single address. Leave unset when Boardy is reachable directly. |
 | NODE_ENV | unset | Set to production to add the Secure cookie attribute. |
 | BOARDY_PUBLIC_URL | derived from the request | Complete public app URL used in invitation emails. Include the `/boardy` subpath when applicable. |
 | BOARDY_MAIL_FROM | `Boardy <boardy@localhost>` | From header used for invitation emails. |
