@@ -592,3 +592,7 @@
   background: rgba(23, 184, 151, .35);
   color: #fff;
 }
+/* Keep the shell exactly viewport-tall so long lists scroll inside .board-scroll */
+.app-shell{height:100vh;height:100dvh;min-height:0;overflow:hidden}
+.main-shell{height:100%;min-height:0;overflow:hidden}
+.sidebar{min-height:0;height:100vh;height:100dvh;overflow-y:auto}
